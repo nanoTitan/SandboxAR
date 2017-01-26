@@ -188,6 +188,9 @@ namespace OpenCVForUnitySample
                 // for each contour, display it
                 for (int idx = 0; idx >= 0; idx = (int)hierarchy.get(0, idx)[0])
                 {
+					if(idx > m_contours.Count)
+						break;
+
                     currCtr = m_contours[idx];
                     currArea = Imgproc.contourArea(currCtr);
                     //if (currArea > maxArea )
