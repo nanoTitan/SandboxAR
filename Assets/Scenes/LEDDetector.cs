@@ -198,6 +198,7 @@ namespace OpenCVForUnitySample
 			}
 
 			Utils.fastTexture2DToMat((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture, rgbaMat);
+            yield return new WaitForEndOfFrame();
 
             Core.flip(rgbaMat, rgbaMat, 0);
 
