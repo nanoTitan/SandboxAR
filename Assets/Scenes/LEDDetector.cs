@@ -11,22 +11,8 @@ using OpenCVForUnity;
 
 namespace OpenCVForUnitySample
 {
-    /// <summary>
-    /// WebCamTexture detect face sample.
-    /// </summary>
-    public class LEDDetector : MonoBehaviour
+    public class OpenCVJob : ThreadedJob
     {
-        [SerializeField] Slider hMinSlider;
-        [SerializeField] Slider hMaxSlider;
-        [SerializeField] Slider sMinSlider;
-        [SerializeField] Slider sMaxSlider;
-        [SerializeField] Slider vMinSlider;
-        [SerializeField] Slider vMaxSlider;
-        [SerializeField] Renderer renderTarget;
-        [SerializeField] Renderer vuforiaRenderTarget;
-        [SerializeField] GameObject targetPosDebug;
-
-        Texture2D texture;
         Mat rgbaMat;
         Mat renderMat;
         Mat blurredMat;
@@ -37,68 +23,8 @@ namespace OpenCVForUnitySample
         Mat erodeElement;
         Mat hierarchy;
 
-        // HSV: 180-230, 0-100, 50-100
-        Scalar minHSV = new Scalar(0, 0, 0);
-        Scalar maxHSV = new Scalar(180, 255, 255);
-
-        float focalLength = 10.0f; // 790.65f;
-        float targetWidth = 62.0f * 0.0804f;  // translate mm to world units
-
-        // Color buffer to prevent having to reallocate each frame
-        Color32[] colors = null;
-
-		bool coroutineIsRunning = false;
-
-        // Use this for initialization
-        void Start ()
+        public void InitOpenCVJob(Texture2D texture)
         {
-            VuforiaARController.Instance.RegisterVuforiaStartedCallback(OnVuforiaStarted);
-            VuforiaARController.Instance.RegisterTrackablesUpdatedCallback(OnVuforiaTrackablesUpdated);
-
-            OnHMinValueSlider();
-            OnHMaxValueSlider();
-            OnSMinValueSlider();
-            OnSMaxValueSlider();
-            OnVMinValueSlider();
-            OnVMaxValueSlider();
-
-            targetPosDebug.SetActive(false);
-
-            StartCoroutine(InitMats());
-        }
-
-        private void OnVuforiaStarted()
-        {
-            // Vuforia has started, now register camera image format
-            //if (CameraDevice.Instance.SetFrameFormat(mPixelFormat, true))
-            //{
-            //    Debug.Log("Successfully registered pixel format " + mPixelFormat.ToString());
-            //    mFormatRegistered = true;
-            //}
-            //else
-            //{
-            //    Debug.LogError("Failed to register pixel format " + mPixelFormat.ToString() +
-            //        "\n the format may be unsupported by your device;" +
-            //        "\n consider using a different pixel format.");
-            //    mFormatRegistered = false;
-            //}
-
-            OnWebCamTextureToMatHelperInited();
-        }
-
-        IEnumerator InitMats()
-        {
-            while(!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
-            {
-                yield return new WaitForSeconds(0.1f);
-            }
-
-            Texture2D bgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
-            while ((bgTexture.format != TextureFormat.RGB24 && bgTexture.format != TextureFormat.RGBA32))
-            {
-                yield return new WaitForSeconds(0.1f);
-            }
-
             blurredMat = new Mat();
             hsvMat = new Mat();
             maskMat = new Mat();
@@ -107,105 +33,41 @@ namespace OpenCVForUnitySample
             erodeElement = new Mat();
             hierarchy = new Mat();
 
-            if (bgTexture.format == TextureFormat.RGB24)
+            if (texture.format == TextureFormat.RGB24)
             {
-                rgbaMat = new Mat(bgTexture.height, bgTexture.width, CvType.CV_8UC3);
+                rgbaMat = new Mat(texture.height, texture.width, CvType.CV_8UC3);
             }
-            else if (bgTexture.format == TextureFormat.RGBA32)
+            else if (texture.format == TextureFormat.RGBA32)
             {
-                rgbaMat = new Mat(bgTexture.height, bgTexture.width, CvType.CV_8UC4);
+                rgbaMat = new Mat(texture.height, texture.width, CvType.CV_8UC4);
             }
             else
             {
-                Debug.Log("Unsupported camera texture format detected: " + bgTexture.format.ToString());
-                yield return null;
+                Debug.Log("Unsupported camera texture format detected: " + texture.format.ToString());
             }
 
-            renderMat = new Mat(bgTexture.height, bgTexture.width, CvType.CV_8UC4);
-
-            // Create our render target's Texture2D
-            texture = new Texture2D(bgTexture.width, bgTexture.height, TextureFormat.RGBA32, false);
-            renderTarget.material.mainTexture = texture;
-
-            // Make sure our render target tracks Vuforia's                    
-            renderTarget.transform.position = vuforiaRenderTarget.transform.position;
-            renderTarget.transform.localRotation = Quaternion.identity;
-            renderTarget.transform.localScale = new Vector3(
-                vuforiaRenderTarget.transform.localScale.x * 2,
-                vuforiaRenderTarget.transform.localScale.z * 2,
-                vuforiaRenderTarget.transform.localScale.y * 2);
-
-            colors = new Color32[bgTexture.width * bgTexture.height];         
+            renderMat = new Mat(texture.height, texture.width, CvType.CV_8UC4);
         }
 
-        /// <summary>
-        /// Raises the web cam texture to mat helper inited event.
-        /// </summary>
-        public void OnWebCamTextureToMatHelperInited ()
+        public void UpdateMatRGBA(Texture2D texture)
         {
+            Utils.fastTexture2DToMat(texture, rgbaMat);
         }
 
-        /// <summary>
-        /// Raises the web cam texture to mat helper disposed event.
-        /// </summary>
-        public void OnWebCamTextureToMatHelperDisposed ()
+        protected override void ThreadFunction()
         {
-            Debug.Log ("OnWebCamTextureToMatHelperDisposed");
-
-            if (blurredMat != null)
-                blurredMat.Dispose ();
-
-            if (hsvMat != null)
-                hsvMat.Dispose ();
-
-            if (maskMat != null)
-                maskMat.Dispose();
-
-            if (morphOutputMat != null)
-                morphOutputMat.Dispose();
-        }
-
-        /// <summary>
-        /// Raises the web cam texture to mat helper error occurred event.
-        /// </summary>
-        /// <param name="errorCode">Error code.</param>
-        public void OnWebCamTextureToMatHelperErrorOccurred(WebCamTextureToMatHelper.ErrorCode errorCode)
-        {
-            Debug.Log ("OnWebCamTextureToMatHelperErrorOccurred " + errorCode);
-        }
-
-        // Only update when Vuforia has updated it's frame
-        private void OnVuforiaTrackablesUpdated()
-        {
-			if(!coroutineIsRunning)
-				StartCoroutine( TrackTargets() );
-		}
-
-		private IEnumerator TrackTargets()
-		{
-			coroutineIsRunning = true;
-
+            // Do your threaded task. DON'T use the Unity API here
             if (rgbaMat == null)
-			{
-				coroutineIsRunning = false;
-                yield break;
-			}
-
-            if (!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
-			{
-				coroutineIsRunning = false;
-				yield break;
-			}
-
-			Utils.fastTexture2DToMat((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture, rgbaMat);
-            yield return new WaitForEndOfFrame();
+            {
+                return;
+            }
 
             Core.flip(rgbaMat, rgbaMat, 0);
 
             renderMat.setTo(new Scalar(0, 0, 0, 0));
 
             Imgproc.blur(rgbaMat, blurredMat, new Size(7, 7));
-            Imgproc.cvtColor (blurredMat, hsvMat, Imgproc.COLOR_BGR2HSV);
+            Imgproc.cvtColor(blurredMat, hsvMat, Imgproc.COLOR_BGR2HSV);
 
             Core.inRange(hsvMat, minHSV, maxHSV, maskMat);
 
@@ -223,7 +85,7 @@ namespace OpenCVForUnitySample
             Imgproc.dilate(maskMat, morphOutputMat, dilateElement);
             Imgproc.dilate(maskMat, morphOutputMat, dilateElement);
 
-            List<MatOfPoint> contours = new List<MatOfPoint>();            
+            List<MatOfPoint> contours = new List<MatOfPoint>();
 
             // find contours
             Imgproc.findContours(morphOutputMat, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
@@ -237,7 +99,7 @@ namespace OpenCVForUnitySample
                 float[] radius2 = new float[1];
                 Point center1 = new Point { x = 0, y = 0 };
                 Point center2 = new Point { x = 0, y = 0 };
-                bool[] circleFound = new bool[2] {false, false};
+                bool[] circleFound = new bool[2] { false, false };
 
                 // for each contour, display it
                 for (int idx = 0; idx >= 0; idx = (int)hierarchy.get(0, idx)[0])
@@ -248,7 +110,7 @@ namespace OpenCVForUnitySample
                     {
                         MatOfPoint2f c2f = new MatOfPoint2f(currCtr.toArray());
                         if (!circleFound[0])
-                        {   
+                        {
                             Imgproc.minEnclosingCircle(c2f, center1, radius1);
                             circleFound[0] = true;
                         }
@@ -262,10 +124,10 @@ namespace OpenCVForUnitySample
                     }
 
                     // Draw the countour
-                    Imgproc.drawContours(renderMat, contours, idx, new Scalar(255, 0, 0, 255)); 
+                    Imgproc.drawContours(renderMat, contours, idx, new Scalar(255, 0, 0, 255));
                 }
 
-                if(circleFound[0])
+                if (circleFound[0])
                     Imgproc.circle(renderMat, center1, (int)radius1[0], new Scalar(0, 255, 0, 255), 2);
 
                 if (circleFound[1])
@@ -278,13 +140,6 @@ namespace OpenCVForUnitySample
                     GetTrackableInfo(center1, center2, ref pos, ref rot);
                 }
             }
-
-            //Core.flip(renderMat, renderMat, 0);
-            Utils.matToTexture2D(renderMat, texture, colors);
-
-			coroutineIsRunning = false;
-
-			yield return null;
         }
 
         void GetTrackableInfo(Point c1, Point c2, ref Vector3 pos, ref Quaternion rot)
@@ -333,6 +188,124 @@ namespace OpenCVForUnitySample
             if (!targetPosDebug.activeSelf)
                 targetPosDebug.SetActive(true);
             targetPosDebug.transform.position = pos;
+        }
+
+        protected override void OnFinished()
+        {
+            // This is executed by the Unity main thread when the job is finished
+            Utils.matToTexture2D(renderMat, texture, colors);
+        }
+    }
+
+
+    public class LEDDetector : MonoBehaviour
+    {
+        [SerializeField] Slider hMinSlider;
+        [SerializeField] Slider hMaxSlider;
+        [SerializeField] Slider sMinSlider;
+        [SerializeField] Slider sMaxSlider;
+        [SerializeField] Slider vMinSlider;
+        [SerializeField] Slider vMaxSlider;
+        [SerializeField] Renderer renderTarget;
+        [SerializeField] Renderer vuforiaRenderTarget;
+        [SerializeField] GameObject targetPosDebug;
+
+        Texture2D texture;
+        OpenCVJob m_job;
+
+        // HSV: 180-230, 0-100, 50-100
+        Scalar minHSV = new Scalar(0, 0, 0);
+        Scalar maxHSV = new Scalar(180, 255, 255);
+
+        float focalLength = 10.0f; // 790.65f;
+        float targetWidth = 62.0f * 0.0804f;  // translate mm to world units
+
+        // Color buffer to prevent having to reallocate each frame
+        Color32[] colors = null;
+
+		bool coroutineIsRunning = false;
+
+        // Use this for initialization
+        void Start ()
+        {
+            VuforiaARController.Instance.RegisterVuforiaStartedCallback(OnVuforiaStarted);
+            VuforiaARController.Instance.RegisterTrackablesUpdatedCallback(OnVuforiaTrackablesUpdated);
+
+            OnHMinValueSlider();
+            OnHMaxValueSlider();
+            OnSMinValueSlider();
+            OnSMaxValueSlider();
+            OnVMinValueSlider();
+            OnVMaxValueSlider();
+
+            targetPosDebug.SetActive(false);
+
+            StartCoroutine(InitMats());
+        }
+
+        private void OnVuforiaStarted()
+        {
+        }
+
+        IEnumerator InitMats()
+        {
+            while(!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
+            {
+                yield return new WaitForSeconds(0.1f);
+            }
+
+            Texture2D bgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
+            while ((bgTexture.format != TextureFormat.RGB24 && bgTexture.format != TextureFormat.RGBA32))
+            {
+                yield return new WaitForSeconds(0.1f);
+            }
+
+            // Create our render target's Texture2D
+            texture = new Texture2D(bgTexture.width, bgTexture.height, TextureFormat.RGBA32, false);
+            renderTarget.material.mainTexture = texture;
+
+            // Make sure our render target tracks Vuforia's                    
+            renderTarget.transform.position = vuforiaRenderTarget.transform.position;
+            renderTarget.transform.localRotation = Quaternion.identity;
+            renderTarget.transform.localScale = new Vector3(
+                vuforiaRenderTarget.transform.localScale.x * 2,
+                vuforiaRenderTarget.transform.localScale.z * 2,
+                vuforiaRenderTarget.transform.localScale.y * 2);
+
+            colors = new Color32[bgTexture.width * bgTexture.height];
+
+            m_job = new OpenCVJob();
+            m_job.InitOpenCVJob(texture);
+        }
+
+        /// <summary>
+        /// Raises the web cam texture to mat helper error occurred event.
+        /// </summary>
+        /// <param name="errorCode">Error code.</param>
+        public void OnWebCamTextureToMatHelperErrorOccurred(WebCamTextureToMatHelper.ErrorCode errorCode)
+        {
+            Debug.Log ("OnWebCamTextureToMatHelperErrorOccurred " + errorCode);
+        }
+
+        // Only update when Vuforia has updated it's frame
+        private void OnVuforiaTrackablesUpdated()
+        {
+            TrackTargets();
+		}
+
+		private IEnumerator TrackTargets()
+		{
+            if (!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
+            {
+                yield break;
+            }
+
+            // Check if job is completed before starting again
+            if (m_job.IsDone)
+            {
+                m_job.UpdateMatRGBA((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture);
+                yield return StartCoroutine(m_job.WaitFor());
+            }
         }
 
         public void OnHMinValueSlider()
