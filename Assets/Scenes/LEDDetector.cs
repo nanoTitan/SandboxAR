@@ -33,6 +33,9 @@ namespace OpenCVForUnitySample
         Mat hsvMat;
         Mat maskMat;
         Mat morphOutputMat;
+        Mat dilateElement;
+        Mat erodeElement;
+        Mat hierarchy;
 
         // HSV: 180-230, 0-100, 50-100
         Scalar minHSV = new Scalar(0, 0, 0);
@@ -100,6 +103,9 @@ namespace OpenCVForUnitySample
             hsvMat = new Mat();
             maskMat = new Mat();
             morphOutputMat = new Mat();
+            dilateElement = new Mat();
+            erodeElement = new Mat();
+            hierarchy = new Mat();
 
             if (bgTexture.format == TextureFormat.RGB24)
             {
@@ -191,8 +197,7 @@ namespace OpenCVForUnitySample
 				yield break;
 			}
 
-            Texture2D vuforiaBgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
-			Utils.texture2DToMat(vuforiaBgTexture, rgbaMat);
+			Utils.fastTexture2DToMat((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture, rgbaMat);
 
             Core.flip(rgbaMat, rgbaMat, 0);
 
@@ -208,8 +213,8 @@ namespace OpenCVForUnitySample
 
             // morphological operators
             // dilate with large element, erode with small ones
-            Mat dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(24, 24));
-            Mat erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(12, 12));
+            dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(24, 24));
+            erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(12, 12));
 
             Imgproc.erode(maskMat, morphOutputMat, erodeElement);
             Imgproc.erode(maskMat, morphOutputMat, erodeElement);
@@ -217,8 +222,7 @@ namespace OpenCVForUnitySample
             Imgproc.dilate(maskMat, morphOutputMat, dilateElement);
             Imgproc.dilate(maskMat, morphOutputMat, dilateElement);
 
-            List<MatOfPoint> contours = new List<MatOfPoint>();
-            Mat hierarchy = new Mat();
+            List<MatOfPoint> contours = new List<MatOfPoint>();            
 
             // find contours
             Imgproc.findContours(morphOutputMat, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
