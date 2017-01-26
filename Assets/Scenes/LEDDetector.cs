@@ -27,7 +27,6 @@ namespace OpenCVForUnitySample
         [SerializeField] GameObject targetPosDebug;
 
         Texture2D texture;
-        WebCamTextureToMatHelper webCamTextureToMatHelper;
         Mat rgbaMat;
         Mat renderMat;
         Mat blurredMat;
@@ -45,23 +44,11 @@ namespace OpenCVForUnitySample
         // Color buffer to prevent having to reallocate each frame
         Color32[] colors = null;
 
+		bool coroutineIsRunning = false;
+
         // Use this for initialization
         void Start ()
         {
-            webCamTextureToMatHelper = gameObject.GetComponent<WebCamTextureToMatHelper> ();
-
-#if UNITY_WEBGL && !UNITY_EDITOR
-            StartCoroutine (Utils.getFilePathAsync ("lbpcascade_frontalface.xml", (result) => {
-                cascade = new CascadeClassifier ();
-                cascade.load (result);
-
-                webCamTextureToMatHelper.Init ();
-            }));
-
-#else
-            //webCamTextureToMatHelper.Init ();
-#endif
-
             VuforiaARController.Instance.RegisterVuforiaStartedCallback(OnVuforiaStarted);
             VuforiaARController.Instance.RegisterTrackablesUpdatedCallback(OnVuforiaTrackablesUpdated);
 
@@ -184,16 +171,28 @@ namespace OpenCVForUnitySample
         // Only update when Vuforia has updated it's frame
         private void OnVuforiaTrackablesUpdated()
         {
+			if(!coroutineIsRunning)
+				StartCoroutine( TrackTargets() );
+		}
+
+		private IEnumerator TrackTargets()
+		{
+			coroutineIsRunning = true;
+
             if (rgbaMat == null)
-                return;
+			{
+				coroutineIsRunning = false;
+                yield break;
+			}
 
             if (!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
-            {
-                return;
-            }
+			{
+				coroutineIsRunning = false;
+				yield break;
+			}
 
-            Texture2D bgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
-            Utils.texture2DToMat(bgTexture, rgbaMat);
+            Texture2D vuforiaBgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
+			Utils.texture2DToMat(vuforiaBgTexture, rgbaMat);
 
             Core.flip(rgbaMat, rgbaMat, 0);
 
@@ -277,6 +276,10 @@ namespace OpenCVForUnitySample
 
             //Core.flip(renderMat, renderMat, 0);
             Utils.matToTexture2D(renderMat, texture, colors);
+
+			coroutineIsRunning = false;
+
+			yield return null;
         }
 
         void GetTrackableInfo(Point c1, Point c2, ref Vector3 pos, ref Quaternion rot)
@@ -325,58 +328,6 @@ namespace OpenCVForUnitySample
             if (!targetPosDebug.activeSelf)
                 targetPosDebug.SetActive(true);
             targetPosDebug.transform.position = pos;
-        }
-
-        /// <summary>
-        /// Raises the disable event.
-        /// </summary>
-        void OnDisable ()
-        {
-            webCamTextureToMatHelper.Dispose ();
-        }
-
-        /// <summary>
-        /// Raises the back button event.
-        /// </summary>
-        public void OnBackButton ()
-        {
-            #if UNITY_5_3 || UNITY_5_3_OR_NEWER
-            SceneManager.LoadScene ("OpenCVForUnitySample");
-            #else
-            Application.LoadLevel ("OpenCVForUnitySample");
-            #endif
-        }
-
-        /// <summary>
-        /// Raises the play button event.
-        /// </summary>
-        public void OnPlayButton ()
-        {
-            webCamTextureToMatHelper.Play ();
-        }
-
-        /// <summary>
-        /// Raises the pause button event.
-        /// </summary>
-        public void OnPauseButton ()
-        {
-            webCamTextureToMatHelper.Pause ();
-        }
-
-        /// <summary>
-        /// Raises the stop button event.
-        /// </summary>
-        public void OnStopButton ()
-        {
-            webCamTextureToMatHelper.Stop ();
-        }
-
-        /// <summary>
-        /// Raises the change camera button event.
-        /// </summary>
-        public void OnChangeCameraButton ()
-        {
-            webCamTextureToMatHelper.Init (null, webCamTextureToMatHelper.requestWidth, webCamTextureToMatHelper.requestHeight, !webCamTextureToMatHelper.requestIsFrontFacing);
         }
 
         public void OnHMinValueSlider()
