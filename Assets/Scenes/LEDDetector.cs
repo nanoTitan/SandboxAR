@@ -175,8 +175,10 @@ namespace OpenCVForUnitySample
             return true;
         }
 
+        // This is executed by the Unity main thread when the job is finished
         protected override void OnFinished()
         {
+            /*
             // if any contour exist...
             if (hierarchy.size().height > 0 && hierarchy.size().width > 0)
             {
@@ -220,9 +222,9 @@ namespace OpenCVForUnitySample
                 if (circleFound[1])
                     Imgproc.circle(renderMat, center2, (int)radius2[0], new Scalar(0, 0, 255, 255), 2);
             }
-
-            // This is executed by the Unity main thread when the job is finished
+            
             Utils.matToTexture2D(renderMat, m_texture, colors);
+            */
         }
     }
     
@@ -237,7 +239,7 @@ namespace OpenCVForUnitySample
         [SerializeField] Renderer renderTarget;
         [SerializeField] Renderer vuforiaRenderTarget;
         [SerializeField] GameObject targetPosDebug;
-                
+        
         OpenCVJob m_job;
         
         // Use this for initialization
