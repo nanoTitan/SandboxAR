@@ -84,13 +84,12 @@ namespace OpenCVForUnitySample
             circleFound = new bool[2] { false, false };
             center1 = new Point { x = 0, y = 0 };
             center2 = new Point { x = 0, y = 0 };
-
-            IsDone = true;
         }
 
         public void UpdateMatRGBA(Texture2D texture)
         {
-            Utils.fastTexture2DToMat(texture, rgbaMat);
+            //Utils.fastTexture2DToMat(texture, rgbaMat);
+			Utils.texture2DToMat(texture, rgbaMat);
         }
 
         protected override void ThreadFunction()
@@ -178,7 +177,6 @@ namespace OpenCVForUnitySample
         // This is executed by the Unity main thread when the job is finished
         protected override void OnFinished()
         {
-            /*
             // if any contour exist...
             if (hierarchy.size().height > 0 && hierarchy.size().width > 0)
             {
@@ -216,15 +214,15 @@ namespace OpenCVForUnitySample
                     Imgproc.drawContours(renderMat, m_contours, idx, new Scalar(255, 0, 0, 255));
                 }
 
-                if (circleFound[0])
+                //if (circleFound[0])
                     Imgproc.circle(renderMat, center1, (int)radius1[0], new Scalar(0, 255, 0, 255), 2);
 
-                if (circleFound[1])
+                //if (circleFound[1])
                     Imgproc.circle(renderMat, center2, (int)radius2[0], new Scalar(0, 0, 255, 255), 2);
             }
             
-            Utils.matToTexture2D(renderMat, m_texture, colors);
-            */
+            //Utils.matToTexture2D(renderMat, m_texture, colors);
+			Utils.matToTexture2D(blurredMat, m_texture, colors);
         }
     }
     
@@ -284,6 +282,7 @@ namespace OpenCVForUnitySample
 
             m_job = new OpenCVJob();
             m_job.InitOpenCVJob(newTexture, vuforiaRenderTarget);
+			m_job.Start();
 
             OnMinValueSlider();
             OnMaxValueSlider();
@@ -303,10 +302,10 @@ namespace OpenCVForUnitySample
             }
 
             // Check if job is completed before starting again
-            if (m_job.IsDone)
+			if (m_job.JobState == ThreadedJobState.Idle)
             {
                 m_job.UpdateMatRGBA((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture);
-                m_job.Start();
+				m_job.Work();
                 yield return StartCoroutine(m_job.WaitFor());
 
                 // Debug target pos
@@ -318,7 +317,6 @@ namespace OpenCVForUnitySample
 
                     targetPosDebug.transform.position = newPos;
                 }
-
             }
         }
 

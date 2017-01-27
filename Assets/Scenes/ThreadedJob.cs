@@ -1,18 +1,27 @@
 ﻿using System.Collections;
 
+public enum ThreadedJobState
+{
+	Idle,
+	Start,
+	Running,
+	Finished
+}
+
 public class ThreadedJob
 {
-    private bool m_IsDone = false;
+	private ThreadedJobState state;
     private object m_Handle = new object();
     private System.Threading.Thread m_Thread = null;
-    public bool IsDone
+    
+	public ThreadedJobState JobState
     {
         get
         {
-            bool tmp;
+			ThreadedJobState tmp;
             lock (m_Handle)
             {
-                tmp = m_IsDone;
+				tmp = state;
             }
             return tmp;
         }
@@ -20,7 +29,7 @@ public class ThreadedJob
         {
             lock (m_Handle)
             {
-                m_IsDone = value;
+				state = value;
             }
         }
     }
@@ -30,6 +39,12 @@ public class ThreadedJob
         m_Thread = new System.Threading.Thread(Run);
         m_Thread.Start();
     }
+
+	public virtual void Work()
+	{
+		JobState = ThreadedJobState.Start;
+	}
+
     public virtual void Abort()
     {
         m_Thread.Abort();
@@ -41,9 +56,10 @@ public class ThreadedJob
 
     public virtual bool Update()
     {
-        if (IsDone)
+		if (JobState == ThreadedJobState.Finished)
         {
             OnFinished();
+			JobState = ThreadedJobState.Idle;
             return true;
         }
         return false;
@@ -59,7 +75,18 @@ public class ThreadedJob
 
     private void Run()
     {
-        ThreadFunction();
-        IsDone = true;
+		while(true)
+		{
+			if(JobState == ThreadedJobState.Start)
+			{
+				JobState = ThreadedJobState.Running;
+		        ThreadFunction();
+				JobState = ThreadedJobState.Finished;
+			}
+			else
+			{
+				System.Threading.Thread.Sleep(10);
+			}
+		}
     }
 }
