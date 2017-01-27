@@ -14,6 +14,7 @@ namespace OpenCVForUnitySample
     public class OpenCVJob : ThreadedJob
     {
         Mat rgbaMat;
+		Mat rgbMat;
         Mat renderMat;
         Mat blurredMat;
         Mat hsvMat;
@@ -64,6 +65,7 @@ namespace OpenCVForUnitySample
             dilateElement = new Mat();
             erodeElement = new Mat();
             hierarchy = new Mat();
+			rgbMat = new Mat();
 
             if (m_texture.format == TextureFormat.RGB24)
             {
@@ -97,12 +99,10 @@ namespace OpenCVForUnitySample
             if (rgbaMat == null)
                 return;
 
-            Core.flip(rgbaMat, rgbaMat, 0);
-
-            renderMat.setTo(new Scalar(0, 0, 0, 0));
-
-            Imgproc.blur(rgbaMat, blurredMat, new Size(7, 7));
-            Imgproc.cvtColor(blurredMat, hsvMat, Imgproc.COLOR_BGR2HSV);
+            //Core.flip(rgbaMat, rgbaMat, 0);
+            //Imgproc.blur(rgbaMat, blurredMat, new Size(7, 7));
+			Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
+			Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
 
             Core.inRange(hsvMat, minHSV, maxHSV, maskMat);
 
@@ -120,6 +120,8 @@ namespace OpenCVForUnitySample
             m_contours.Clear();
             circleFound[0] = false;
             circleFound[1] = false;
+
+			renderMat.setTo(new Scalar(0, 0, 0, 0));
 
             // find contours
             Imgproc.findContours(morphOutputMat, m_contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
@@ -214,15 +216,15 @@ namespace OpenCVForUnitySample
                     Imgproc.drawContours(renderMat, m_contours, idx, new Scalar(255, 0, 0, 255));
                 }
 
-                //if (circleFound[0])
+                if (circleFound[0])
                     Imgproc.circle(renderMat, center1, (int)radius1[0], new Scalar(0, 255, 0, 255), 2);
 
-                //if (circleFound[1])
+                if (circleFound[1])
                     Imgproc.circle(renderMat, center2, (int)radius2[0], new Scalar(0, 0, 255, 255), 2);
             }
             
-            //Utils.matToTexture2D(renderMat, m_texture, colors);
-			Utils.matToTexture2D(blurredMat, m_texture, colors);
+            Utils.matToTexture2D(renderMat, m_texture, colors);
+			//Utils.matToTexture2D(blurredMat, m_texture, colors);
         }
     }
     
