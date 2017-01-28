@@ -18,7 +18,7 @@ namespace OpenCVForUnitySample
         Mat renderMat;
         Mat blurredMat;
         Mat hsvMat;
-        Mat maskMat;
+		Mat threshold;
         Mat morphOutputMat;
         Mat dilateElement;
         Mat erodeElement;
@@ -38,6 +38,8 @@ namespace OpenCVForUnitySample
         List<MatOfPoint> m_contours = null;
         Texture2D m_texture;
         Renderer m_vuforiaRenderer;
+
+		int debugPrint = 0;
 
         public void SetMinHSV(float h, float s, float v)
         {
@@ -60,10 +62,8 @@ namespace OpenCVForUnitySample
 
             blurredMat = new Mat();
             hsvMat = new Mat();
-            maskMat = new Mat();
+			threshold = new Mat();
             morphOutputMat = new Mat();
-            dilateElement = new Mat();
-            erodeElement = new Mat();
             hierarchy = new Mat();
 			rgbMat = new Mat();
 
@@ -104,27 +104,28 @@ namespace OpenCVForUnitySample
 			Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
 			Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
 
-            Core.inRange(hsvMat, minHSV, maxHSV, maskMat);
+            Core.inRange(hsvMat, minHSV, maxHSV, threshold);
 
-            // morphological operators
-            // dilate with large element, erode with small ones
-            dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(24, 24));
-            erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(12, 12));
+			// morphological operators
+			// dilate with large element, erode with small ones
+			dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(8, 8));
+			erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
 
-            Imgproc.erode(maskMat, morphOutputMat, erodeElement);
-            Imgproc.erode(maskMat, morphOutputMat, erodeElement);
+			Imgproc.erode(threshold, threshold, erodeElement);
+			Imgproc.erode(threshold, threshold, erodeElement);
 
-            Imgproc.dilate(maskMat, morphOutputMat, dilateElement);
-            Imgproc.dilate(maskMat, morphOutputMat, dilateElement);
+			Imgproc.dilate(threshold, threshold, dilateElement);
+			Imgproc.dilate(threshold, threshold, dilateElement);
 
             m_contours.Clear();
             circleFound[0] = false;
             circleFound[1] = false;
 
 			renderMat.setTo(new Scalar(0, 0, 0, 0));
+			hierarchy = new Mat();
 
             // find contours
-            Imgproc.findContours(morphOutputMat, m_contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+			Imgproc.findContours(threshold, m_contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
         }
 
         public bool GetTrackableInfo(ref Vector3 pos)
@@ -180,7 +181,7 @@ namespace OpenCVForUnitySample
         protected override void OnFinished()
         {
             // if any contour exist...
-            if (hierarchy.size().height > 0 && hierarchy.size().width > 0)
+			if (hierarchy.rows() > 0)
             {
                 MatOfPoint currCtr = null;
                 double maxArea = 0, currArea = 0;
@@ -224,7 +225,21 @@ namespace OpenCVForUnitySample
             }
             
             Utils.matToTexture2D(renderMat, m_texture, colors);
-			//Utils.matToTexture2D(blurredMat, m_texture, colors);
+
+			if (debugPrint == 50)
+			{
+				//string s = rgbaMat.dump();
+				for(int i = 100; i < 105; ++i)
+				{
+					for(int j = 100; j < 105; ++j)
+					{
+						double[] data = rgbaMat.get(i, j);
+						Debug.Log(data[0] + ", " + data[1] + ", " + data[2] + ", " + data[3]);
+					}
+				}
+
+			}
+			++debugPrint;
         }
     }
     
