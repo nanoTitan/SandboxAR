@@ -55,7 +55,7 @@ namespace OpenCVForUnitySample
             maxHSV.val[2] = v;
         }
 
-        public void InitOpenCVJob(Texture2D texture, Renderer vuforiaRenderer)
+        public void InitOpenCVJob(Vuforia.Image image, Texture2D texture, Renderer vuforiaRenderer)
         {
             m_texture = texture;
             m_vuforiaRenderer = vuforiaRenderer;
@@ -65,20 +65,8 @@ namespace OpenCVForUnitySample
 			threshold = new Mat();
             morphOutputMat = new Mat();
             hierarchy = new Mat();
-			rgbMat = new Mat();
-
-            if (m_texture.format == TextureFormat.RGB24)
-            {
-                rgbaMat = new Mat(m_texture.height, m_texture.width, CvType.CV_8UC3);
-            }
-            else if (m_texture.format == TextureFormat.RGBA32)
-            {
-                rgbaMat = new Mat(m_texture.height, m_texture.width, CvType.CV_8UC4);
-            }
-            else
-            {
-                Debug.Log("Unsupported camera texture format detected: " + m_texture.format.ToString());
-            }
+            rgbMat = new Mat();
+            rgbaMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC4);
 
             renderMat = new Mat(m_texture.height, m_texture.width, CvType.CV_8UC4);
             colors = new Color32[m_texture.width * m_texture.height];
@@ -88,10 +76,13 @@ namespace OpenCVForUnitySample
             center2 = new Point { x = 0, y = 0 };
         }
 
-        public void UpdateMatRGBA(Texture2D texture)
+        //public void UpdateMatRGBA(Texture2D texture)
+        public void UpdateMat(Vuforia.Image image)
         {
             //Utils.fastTexture2DToMat(texture, rgbaMat);
-			Utils.texture2DToMat(texture, rgbaMat);
+            //Utils.texture2DToMat(texture, rgbaMat);
+
+            rgbaMat.put(0, 0, image.Pixels);
         }
 
         protected override void ThreadFunction()
@@ -256,37 +247,90 @@ namespace OpenCVForUnitySample
         [SerializeField] GameObject targetPosDebug;
         
         OpenCVJob m_job;
-        
+        Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGBA8888;
+        bool m_formatRegistered = false;
+
         // Use this for initialization
         void Start ()
         {
             VuforiaARController.Instance.RegisterVuforiaStartedCallback(OnVuforiaStarted);
+            VuforiaARController.Instance.RegisterOnPauseCallback(OnVuforiaPause);
             VuforiaARController.Instance.RegisterTrackablesUpdatedCallback(OnVuforiaTrackablesUpdated);
 
             targetPosDebug.SetActive(false);
-
-            StartCoroutine(InitMats());
         }
 
         private void OnVuforiaStarted()
         {
+            RegisterFormat();
+            StartCoroutine(InitMats());
+        }
+
+        private void OnVuforiaPause(bool paused)
+        {
+            if (paused)
+            {
+                Debug.Log("App was paused");
+                UnregisterFormat();
+            }
+            else
+            {
+                Debug.Log("App was resumed");
+                RegisterFormat();
+            }
+        }
+
+        private void UnregisterFormat()
+        {
+            Debug.Log("Unregistering camera pixel format " + m_pixelFormat.ToString());
+            CameraDevice.Instance.SetFrameFormat(m_pixelFormat, false);
+            m_formatRegistered = false;
+        }
+        
+        private void RegisterFormat()
+        {
+            // Vuforia has started, now register camera image format
+            if (CameraDevice.Instance.SetFrameFormat(m_pixelFormat, true))
+            {
+                Debug.Log("Successfully registered pixel format " + m_pixelFormat.ToString());
+                m_formatRegistered = true;
+            }
+            else
+            {
+                Debug.LogError("Failed to register pixel format " + m_pixelFormat.ToString() +
+                    "\n the format may be unsupported by your device;" +
+                    "\n consider using a different pixel format.");
+                m_formatRegistered = false;
+            }
         }
 
         IEnumerator InitMats()
         {
-            while(!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
+            //while(!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
+            //{
+            //    yield return new WaitForSeconds(0.1f);
+            //}
+
+            //Texture2D bgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
+            //while ((bgTexture.format != TextureFormat.RGB24 && bgTexture.format != TextureFormat.RGBA32))
+            //{
+            //    yield return new WaitForSeconds(0.1f);
+            //}
+
+            while (!m_formatRegistered)
             {
                 yield return new WaitForSeconds(0.1f);
             }
 
-            Texture2D bgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
-            while ((bgTexture.format != TextureFormat.RGB24 && bgTexture.format != TextureFormat.RGBA32))
+            Vuforia.Image image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
+            while (image == null || !image.IsValid())
             {
                 yield return new WaitForSeconds(0.1f);
+                image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
             }
 
             // Create our render target's Texture2D
-            Texture2D newTexture = new Texture2D(bgTexture.width, bgTexture.height, TextureFormat.RGBA32, false);
+            Texture2D newTexture = new Texture2D(image.Width, image.Height, TextureFormat.RGBA32, false);
             renderTarget.material.mainTexture = newTexture;
 
             // Make sure our render target tracks Vuforia's                    
@@ -298,7 +342,7 @@ namespace OpenCVForUnitySample
                 vuforiaRenderTarget.transform.localScale.y * 2);
 
             m_job = new OpenCVJob();
-            m_job.InitOpenCVJob(newTexture, vuforiaRenderTarget);
+            m_job.InitOpenCVJob(image, newTexture, vuforiaRenderTarget);
 			m_job.Start();
 
             OnMinValueSlider();
@@ -313,16 +357,23 @@ namespace OpenCVForUnitySample
 
 		private IEnumerator TrackTargets()
 		{
-            if (m_job == null || !VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
+            if (!m_formatRegistered || m_job == null)
+            {
+                yield break;
+            }
+
+            Vuforia.Image image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
+            if (image == null || !image.IsValid())
             {
                 yield break;
             }
 
             // Check if job is completed before starting again
-			if (m_job.JobState == ThreadedJobState.Idle)
+            if (m_job.JobState == ThreadedJobState.Idle)
             {
-                m_job.UpdateMatRGBA((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture);
-				m_job.Work();
+                //m_job.UpdateMatRGBA((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture);
+                m_job.UpdateMat(image);
+                m_job.Work();
                 yield return StartCoroutine(m_job.WaitFor());
 
                 // Debug target pos
