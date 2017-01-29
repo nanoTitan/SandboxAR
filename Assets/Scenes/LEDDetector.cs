@@ -30,7 +30,7 @@ namespace OpenCVForUnitySample
 
         float focalLength = 10.0f; // 790.65f;
         float targetWidth = 62.0f * 0.0804f;  // translate mm to world units
-
+		Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
         Point center1 = null;
         Point center2 = null;
         bool[] circleFound = null;
@@ -55,8 +55,9 @@ namespace OpenCVForUnitySample
             maxHSV.val[2] = v;
         }
 
-        public void InitOpenCVJob(Vuforia.Image image, Texture2D texture, Renderer vuforiaRenderer)
+		public void InitOpenCVJob(Vuforia.Image image, Vuforia.Image.PIXEL_FORMAT format, Texture2D texture, Renderer vuforiaRenderer)
         {
+			m_pixelFormat = format;
             m_texture = texture;
             m_vuforiaRenderer = vuforiaRenderer;
 
@@ -65,8 +66,18 @@ namespace OpenCVForUnitySample
 			threshold = new Mat();
             morphOutputMat = new Mat();
             hierarchy = new Mat();
-            rgbMat = new Mat();
-            rgbaMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC4);
+
+			if(m_pixelFormat == Vuforia.Image.PIXEL_FORMAT.RGB888)
+			{
+				rgbMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC3);
+				rgbaMat = null;
+			}
+			else
+			{
+				rgbMat = new Mat();
+				rgbaMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC4);
+			}
+            
 
             renderMat = new Mat(m_texture.height, m_texture.width, CvType.CV_8UC4);
             colors = new Color32[m_texture.width * m_texture.height];
@@ -82,19 +93,35 @@ namespace OpenCVForUnitySample
             //Utils.fastTexture2DToMat(texture, rgbaMat);
             //Utils.texture2DToMat(texture, rgbaMat);
 
-            rgbaMat.put(0, 0, image.Pixels);
+			if(m_pixelFormat == Vuforia.Image.PIXEL_FORMAT.RGB888)
+			{
+            	rgbMat.put(0, 0, image.Pixels);
+			}
+			else
+			{
+				rgbaMat.put(0, 0, image.Pixels);
+			}
         }
 
         protected override void ThreadFunction()
         {
-            if (rgbaMat == null)
-                return;
+			if(m_pixelFormat == Vuforia.Image.PIXEL_FORMAT.RGB888 && rgbMat == null)
+			{
+				return;
+			}
+
+			if(m_pixelFormat == Vuforia.Image.PIXEL_FORMAT.RGBA8888)
+			{
+	            if (rgbaMat == null)
+	                return;
+
+				Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
+			}
 
             //Core.flip(rgbaMat, rgbaMat, 0);
             //Imgproc.blur(rgbaMat, blurredMat, new Size(7, 7));
-			Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
-			Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
 
+			Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
             Core.inRange(hsvMat, minHSV, maxHSV, threshold);
 
 			// morphological operators
@@ -224,8 +251,11 @@ namespace OpenCVForUnitySample
 				{
 					for(int j = 100; j < 105; ++j)
 					{
-						double[] data = rgbaMat.get(i, j);
-						Debug.Log(data[0] + ", " + data[1] + ", " + data[2] + ", " + data[3]);
+						if(rgbaMat != null)
+						{
+							double[] data = rgbaMat.get(i, j);
+							Debug.Log(data[0] + ", " + data[1] + ", " + data[2] + ", " + data[3]);
+						}
 					}
 				}
 
@@ -247,7 +277,7 @@ namespace OpenCVForUnitySample
         [SerializeField] GameObject targetPosDebug;
         
         OpenCVJob m_job;
-        Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGBA8888;
+        Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
         bool m_formatRegistered = false;
 
         // Use this for initialization
@@ -290,8 +320,15 @@ namespace OpenCVForUnitySample
         private void RegisterFormat()
         {
             // Vuforia has started, now register camera image format
-            if (CameraDevice.Instance.SetFrameFormat(m_pixelFormat, true))
+			if (CameraDevice.Instance.SetFrameFormat(Vuforia.Image.PIXEL_FORMAT.RGBA8888, true))
+			{
+				m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGBA8888;
+				Debug.Log("Successfully registered pixel format " + m_pixelFormat.ToString());
+				m_formatRegistered = true;
+			}
+			else if (CameraDevice.Instance.SetFrameFormat(Vuforia.Image.PIXEL_FORMAT.RGB888, true))
             {
+				m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
                 Debug.Log("Successfully registered pixel format " + m_pixelFormat.ToString());
                 m_formatRegistered = true;
             }
@@ -342,7 +379,7 @@ namespace OpenCVForUnitySample
                 vuforiaRenderTarget.transform.localScale.y * 2);
 
             m_job = new OpenCVJob();
-            m_job.InitOpenCVJob(image, newTexture, vuforiaRenderTarget);
+            m_job.InitOpenCVJob(image, m_pixelFormat, newTexture, vuforiaRenderTarget);
 			m_job.Start();
 
             OnMinValueSlider();
