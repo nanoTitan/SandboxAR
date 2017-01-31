@@ -11,6 +11,7 @@ using OpenCVForUnity;
 
 namespace OpenCVForUnitySample
 {
+
     public class OpenCVJob : ThreadedJob
     {
         Mat rgbaMat;
@@ -34,6 +35,7 @@ namespace OpenCVForUnitySample
         Point center1 = null;
         Point center2 = null;
         bool[] circleFound = null;
+		bool m_isMobile = false;
         Color32[] colors = null;
         List<MatOfPoint> m_contours = null;
         Texture2D m_texture;
@@ -85,6 +87,9 @@ namespace OpenCVForUnitySample
             circleFound = new bool[2] { false, false };
             center1 = new Point { x = 0, y = 0 };
             center2 = new Point { x = 0, y = 0 };
+
+			if(SystemInfo.deviceModel.Contains("iPad") || SystemInfo.deviceModel.Contains("iPhone"))
+				m_isMobile = true;
         }
 
         //public void UpdateMatRGBA(Texture2D texture)
@@ -118,7 +123,7 @@ namespace OpenCVForUnitySample
 				Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
 			}
 
-            //Core.flip(rgbaMat, rgbaMat, 0);
+			//Core.flip(rgbMat, rgbMat, 0);
             //Imgproc.blur(rgbaMat, blurredMat, new Size(7, 7));
 
 			Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
@@ -243,7 +248,9 @@ namespace OpenCVForUnitySample
             }
             
             Utils.matToTexture2D(renderMat, m_texture, colors);
+			//Utils.matToTexture2D(rgbMat, m_texture, colors);
 
+			/*
 			if (debugPrint == 50)
 			{
 				//string s = rgbaMat.dump();
@@ -261,6 +268,7 @@ namespace OpenCVForUnitySample
 
 			}
 			++debugPrint;
+			*/
         }
     }
     
@@ -279,6 +287,11 @@ namespace OpenCVForUnitySample
         OpenCVJob m_job;
         Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
         bool m_formatRegistered = false;
+
+		public static bool IsMobile()
+		{
+			return SystemInfo.deviceModel.Contains("iPad") || SystemInfo.deviceModel.Contains("iPhone");
+		}
 
         // Use this for initialization
         void Start ()
@@ -372,7 +385,12 @@ namespace OpenCVForUnitySample
 
             // Make sure our render target tracks Vuforia's                    
             renderTarget.transform.position = vuforiaRenderTarget.transform.position;
-            renderTarget.transform.localRotation = Quaternion.identity;
+
+			if(IsMobile())
+				renderTarget.transform.localRotation = Quaternion.Euler(0,0,-90);
+			else
+				renderTarget.transform.localRotation = Quaternion.identity;
+
             renderTarget.transform.localScale = new Vector3(
                 vuforiaRenderTarget.transform.localScale.x * 2,
                 vuforiaRenderTarget.transform.localScale.z * 2,
@@ -388,7 +406,7 @@ namespace OpenCVForUnitySample
 
         // Only update when Vuforia has updated it's frame
         private void OnVuforiaTrackablesUpdated()
-        {
+        {	
             StartCoroutine(TrackTargets());
         }
 
@@ -417,10 +435,10 @@ namespace OpenCVForUnitySample
                 Vector3 newPos = new Vector3();
                 if(m_job.GetTrackableInfo(ref newPos))
                 {
-                    if (!targetPosDebug.activeSelf)
-                        targetPosDebug.SetActive(true);
+                    //if (!targetPosDebug.activeSelf)
+                    //    targetPosDebug.SetActive(true);
 
-                    targetPosDebug.transform.position = newPos;
+                    //targetPosDebug.transform.position = newPos;
                 }
             }
         }
