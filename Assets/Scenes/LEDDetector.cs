@@ -207,7 +207,9 @@ namespace OpenCVForUnitySample
 			if (hierarchy.rows() > 0)
             {
                 MatOfPoint currCtr = null;
-                double maxArea = 0, currArea = 0;
+				double maxArea = 0;
+				double maxArea2 = 0;
+				double currArea = 0;
                 float[] radius1 = new float[1];
                 float[] radius2 = new float[1];
 
@@ -219,18 +221,20 @@ namespace OpenCVForUnitySample
 
                     currCtr = m_contours[idx];
                     currArea = Imgproc.contourArea(currCtr);
-                    //if (currArea > maxArea )
+					if (currArea > maxArea || currArea > maxArea2 )
                     {
                         MatOfPoint2f c2f = new MatOfPoint2f(currCtr.toArray());
-                        if (!circleFound[0])
+						if (!circleFound[0] || (currArea > maxArea && maxArea <= maxArea2))
                         {
                             Imgproc.minEnclosingCircle(c2f, center1, radius1);
                             circleFound[0] = true;
+							maxArea = currArea;
                         }
-                        else
+						else if(!circleFound[1] || (currArea > maxArea2) )
                         {
                             Imgproc.minEnclosingCircle(c2f, center2, radius2);
                             circleFound[1] = true;
+							maxArea2 = currArea;
                         }
 
                         maxArea = currArea;
@@ -284,9 +288,11 @@ namespace OpenCVForUnitySample
         [SerializeField] Renderer vuforiaRenderTarget;
         [SerializeField] GameObject targetPosDebug;
         
-        OpenCVJob m_job;
+        OpenCVJob[] m_jobs;
+		Vuforia.Image image = null;
         Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
         bool m_formatRegistered = false;
+		bool m_lastFrameTracked = false;
 
 		public static bool IsMobile()
 		{
@@ -372,7 +378,7 @@ namespace OpenCVForUnitySample
                 yield return new WaitForSeconds(0.1f);
             }
 
-            Vuforia.Image image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
+            image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
             while (image == null || !image.IsValid())
             {
                 yield return new WaitForSeconds(0.1f);
@@ -396,9 +402,13 @@ namespace OpenCVForUnitySample
                 vuforiaRenderTarget.transform.localScale.z * 2,
                 vuforiaRenderTarget.transform.localScale.y * 2);
 
-            m_job = new OpenCVJob();
-            m_job.InitOpenCVJob(image, m_pixelFormat, newTexture, vuforiaRenderTarget);
-			m_job.Start();
+			m_jobs = new OpenCVJob[5];
+			for(int i = 0; i < m_jobs.Length; ++i)
+			{
+				m_jobs[i] = new OpenCVJob();
+				m_jobs[i].InitOpenCVJob(image, m_pixelFormat, newTexture, vuforiaRenderTarget);
+				m_jobs[i].Start();
+			}
 
             OnMinValueSlider();
             OnMaxValueSlider();
@@ -412,28 +422,49 @@ namespace OpenCVForUnitySample
 
 		private IEnumerator TrackTargets()
 		{
-            if (!m_formatRegistered || m_job == null)
+            if (!m_formatRegistered || m_jobs == null)
             {
                 yield break;
             }
 
-            Vuforia.Image image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
+            //Vuforia.Image image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
             if (image == null || !image.IsValid())
             {
                 yield break;
             }
 
+			OpenCVJob currJob = null;
+			int i = 0;
+			foreach(OpenCVJob job in m_jobs)
+			{
+				if(job.JobState == ThreadedJobState.Idle)
+				{
+					currJob = job;
+					Debug.Log("job: " + i);
+					break;
+				}
+
+				++i;
+			}
+
             // Check if job is completed before starting again
-            if (m_job.JobState == ThreadedJobState.Idle)
+			if (currJob != null)
             {
-                //m_job.UpdateMatRGBA((Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture);
-                m_job.UpdateMat(image);
-                m_job.Work();
-                yield return StartCoroutine(m_job.WaitFor());
+				m_lastFrameTracked = !m_lastFrameTracked;
+
+				if(!m_lastFrameTracked)
+				{
+					m_lastFrameTracked = false;
+					yield break;
+				}
+
+				currJob.UpdateMat(image);
+				currJob.Work();
+				yield return StartCoroutine(currJob.WaitFor());
 
                 // Debug target pos
                 Vector3 newPos = new Vector3();
-                if(m_job.GetTrackableInfo(ref newPos))
+				if(currJob.GetTrackableInfo(ref newPos))
                 {
                     //if (!targetPosDebug.activeSelf)
                     //    targetPosDebug.SetActive(true);
@@ -445,12 +476,14 @@ namespace OpenCVForUnitySample
 
         public void OnMinValueSlider()
         {
-            m_job.SetMinHSV(hMinSlider.value, sMinSlider.value, vMinSlider.value);
+			foreach(OpenCVJob job in m_jobs)
+            	job.SetMinHSV(hMinSlider.value, sMinSlider.value, vMinSlider.value);
         }
 
         public void OnMaxValueSlider()
         {
-            m_job.SetMaxHSV(hMaxSlider.value, sMaxSlider.value, vMaxSlider.value);
+			foreach(OpenCVJob job in m_jobs)
+            	job.SetMaxHSV(hMaxSlider.value, sMaxSlider.value, vMaxSlider.value);
         }
     }
 }
