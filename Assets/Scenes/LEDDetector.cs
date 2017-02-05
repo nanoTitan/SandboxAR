@@ -11,6 +11,31 @@ using OpenCVForUnity;
 
 namespace OpenCVForUnitySample
 {
+    public enum TrackableID
+    {
+        LEDRed1 = 0,
+        LEDRed2,
+        LEDGreen1,
+        LEDGreen2,
+
+        NumTrackableIDs // Make sure this is last for total count
+    }
+
+    public class LEDTrackable
+    {
+        public LEDTrackable()
+        {
+            Center = new Point(0, 0);
+            Radius = 0;
+            Area = 0;
+            Found = false;
+        }
+
+        public Point Center { get; set; }
+        public float Radius { get; set; }
+        public double Area { get; set; }
+        public bool Found { get; set; }
+    }
 
     public class OpenCVJob : ThreadedJob
     {
@@ -23,21 +48,27 @@ namespace OpenCVForUnitySample
         Mat morphOutputMat;
         Mat dilateElement;
         Mat erodeElement;
-        Mat hierarchy;
+        Mat m_redHierarchy;
+        Mat m_greenHierarchy;
 
         // HSV: 180-230, 0-100, 50-100
         Scalar minHSV = new Scalar(0, 0, 0);
         Scalar maxHSV = new Scalar(180, 255, 255);
 
+        Scalar minRedHSV = new Scalar(0, 0, 201);
+        Scalar maxRedHSV = new Scalar(45, 60, 255);
+        Scalar minGreenHSV = new Scalar(63, 0, 180);
+        Scalar maxGreenHSV = new Scalar(90, 42, 255);
+
+        float m_contrast = 0.2f;
+        byte m_brightness = 0;
         float focalLength = 10.0f; // 790.65f;
         float targetWidth = 62.0f * 0.0804f;  // translate mm to world units
 		Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
-        Point center1 = null;
-        Point center2 = null;
-        bool[] circleFound = null;
-		bool m_isMobile = false;
+        LEDTrackable[] m_ledTrackableArray = null;
         Color32[] colors = null;
-        List<MatOfPoint> m_contours = null;
+        List<MatOfPoint> m_redContours = null;
+        List<MatOfPoint> m_greenContours = null;
         Texture2D m_texture;
         Renderer m_vuforiaRenderer;
 
@@ -67,9 +98,10 @@ namespace OpenCVForUnitySample
             hsvMat = new Mat();
 			threshold = new Mat();
             morphOutputMat = new Mat();
-            hierarchy = new Mat();
+            m_redHierarchy = new Mat();
+            m_greenHierarchy = new Mat();
 
-			if(m_pixelFormat == Vuforia.Image.PIXEL_FORMAT.RGB888)
+            if (m_pixelFormat == Vuforia.Image.PIXEL_FORMAT.RGB888)
 			{
 				rgbMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC3);
 				rgbaMat = null;
@@ -80,19 +112,16 @@ namespace OpenCVForUnitySample
 				rgbaMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC4);
 			}
             
-
             renderMat = new Mat(m_texture.height, m_texture.width, CvType.CV_8UC4);
             colors = new Color32[m_texture.width * m_texture.height];
-            m_contours = new List<MatOfPoint>();
-            circleFound = new bool[2] { false, false };
-            center1 = new Point { x = 0, y = 0 };
-            center2 = new Point { x = 0, y = 0 };
+            m_redContours = new List<MatOfPoint>();
+            m_greenContours = new List<MatOfPoint>();
 
-			if(SystemInfo.deviceModel.Contains("iPad") || SystemInfo.deviceModel.Contains("iPhone"))
-				m_isMobile = true;
+            m_ledTrackableArray = new LEDTrackable[(int)TrackableID.NumTrackableIDs];
+            for(int i = 0; i < m_ledTrackableArray.Length; ++i)
+                m_ledTrackableArray[i] = new LEDTrackable();
         }
-
-        //public void UpdateMatRGBA(Texture2D texture)
+        
         public void UpdateMat(Vuforia.Image image)
         {
             //Utils.fastTexture2DToMat(texture, rgbaMat);
@@ -123,32 +152,39 @@ namespace OpenCVForUnitySample
 				Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
 			}
 
-			//Core.flip(rgbMat, rgbMat, 0);
-            //Imgproc.blur(rgbaMat, blurredMat, new Size(7, 7));
+            // Adjust contrast and brightness
+            //rgbMat.convertTo(rgbMat, -1, m_contrast, m_brightness);
 
-			Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
-            Core.inRange(hsvMat, minHSV, maxHSV, threshold);
+            // Blur
+            //Imgproc.blur(rgbMat, blurredMat, new Size(7, 7));
 
-			// morphological operators
-			// dilate with large element, erode with small ones
-			dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(8, 8));
-			erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+            Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
 
-			Imgproc.erode(threshold, threshold, erodeElement);
-			Imgproc.erode(threshold, threshold, erodeElement);
+            FindCountours(minRedHSV, maxRedHSV, m_redContours, m_redHierarchy);
+            FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
+            //FindCountours(minHSV, maxHSV, m_greenContours, m_greenHierarchy);
+        }
 
-			Imgproc.dilate(threshold, threshold, dilateElement);
-			Imgproc.dilate(threshold, threshold, dilateElement);
+        void FindCountours(Scalar min, Scalar max, List<MatOfPoint> contours, Mat hierarchy)
+        {
+            Core.inRange(hsvMat, min, max, threshold);
 
-            m_contours.Clear();
-            circleFound[0] = false;
-            circleFound[1] = false;
+            // morphological operators
+            // dilate with large element, erode with small ones
+            dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(8, 8));
+            erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
 
-			renderMat.setTo(new Scalar(0, 0, 0, 0));
-			hierarchy = new Mat();
+            Imgproc.erode(threshold, threshold, erodeElement);
+            Imgproc.erode(threshold, threshold, erodeElement);
+
+            Imgproc.dilate(threshold, threshold, dilateElement);
+            Imgproc.dilate(threshold, threshold, dilateElement);
+
+            contours.Clear();
+            renderMat.setTo(new Scalar(0, 0, 0, 0));
 
             // find contours
-			Imgproc.findContours(threshold, m_contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+            Imgproc.findContours(threshold, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
         }
 
         public bool GetTrackableInfo(ref Vector3 pos)
@@ -167,17 +203,22 @@ namespace OpenCVForUnitySample
             D: distance to camera (mm or inches) 
             */
 
-            if (!circleFound[0] || !circleFound[1])
+            // Target's Center screen space
+            Point center = new Point();
+
+            foreach (LEDTrackable led in m_ledTrackableArray)
             {
-                return false;
+                if(!led.Found)
+                    return false;
+
+                center += led.Center;
             }
 
             // Target's Center screen space
-            float tcX = (float)((center1.x + center2.x) * 0.5);
-            float tcY = (float)((center1.y + center2.y) * 0.5);
-            Vector2 targetCenter = new Vector2(tcX, tcY);
+            float oneOverNumTrackables = 1.0f / (float)TrackableID.NumTrackableIDs;
+            Vector2 targetCenter = new Vector2((float)(center.x * oneOverNumTrackables), (float)(center.y * oneOverNumTrackables));
 
-            float P = Mathf.Abs((float)(center1.x - center2.x));
+            float P = Mathf.Abs((float)(m_ledTrackableArray[0].Center.x - m_ledTrackableArray[1].Center.x));
             float D = targetWidth * focalLength / P;
 
             //Debug.Log("P: " + P);
@@ -197,82 +238,84 @@ namespace OpenCVForUnitySample
             Vector3 newForward = (newPt - Camera.main.transform.position).normalized;
             pos = Camera.main.transform.position + (newForward * D);
 
+            if (float.IsInfinity(pos.x) || float.IsInfinity(pos.y) || float.IsInfinity(pos.z))
+                return false;
+
             return true;
         }
 
         // This is executed by the Unity main thread when the job is finished
         protected override void OnFinished()
         {
+            // Reset LEDs to not found
+            foreach (LEDTrackable led in m_ledTrackableArray)
+                led.Found = false;
+
+            FindLEDs(m_redContours, m_redHierarchy, m_ledTrackableArray[(int)TrackableID.LEDRed1], m_ledTrackableArray[(int)TrackableID.LEDRed2], true);
+            FindLEDs(m_greenContours, m_greenHierarchy, m_ledTrackableArray[(int)TrackableID.LEDGreen1], m_ledTrackableArray[(int)TrackableID.LEDGreen2], true);
+
+            Utils.matToTexture2D(renderMat, m_texture, colors);
+			//Utils.matToTexture2D(threshold, m_texture, colors);
+        }
+
+        void FindLEDs(List<MatOfPoint> contours, Mat hierarchy, LEDTrackable led1, LEDTrackable led2, bool doDraw)
+        {
+            led1.Found = false;
+            led2.Found = false;
+
+            // TODO: Change min/max HSV, blur, or erode/diolate values to lower contour count
+            if (contours.Count > 2)
+                return;
+
             // if any contour exist...
-			if (hierarchy.rows() > 0)
+            if (hierarchy.rows() > 0)
             {
                 MatOfPoint currCtr = null;
-				double maxArea = 0;
-				double maxArea2 = 0;
-				double currArea = 0;
-                float[] radius1 = new float[1];
-                float[] radius2 = new float[1];
+                led1.Area = 0;
+                led2.Area = 0;
+                led1.Radius = 0;
+                led2.Radius = 0;
+                double currArea = 0;
+                float[] radiusArray = new float[1];
 
                 // for each contour, display it
                 for (int idx = 0; idx >= 0; idx = (int)hierarchy.get(0, idx)[0])
                 {
-					if(idx > m_contours.Count)
-						break;
+                    if (idx > contours.Count)
+                        break;
 
-                    currCtr = m_contours[idx];
+                    currCtr = contours[idx];
                     currArea = Imgproc.contourArea(currCtr);
-					if (currArea > maxArea || currArea > maxArea2 )
+                    if (currArea > led1.Area || currArea > led2.Area)
                     {
                         MatOfPoint2f c2f = new MatOfPoint2f(currCtr.toArray());
-						if (!circleFound[0] || (currArea > maxArea && maxArea <= maxArea2))
+                        if (!led1.Found || (currArea > led1.Area && led1.Area <= led2.Area))
                         {
-                            Imgproc.minEnclosingCircle(c2f, center1, radius1);
-                            circleFound[0] = true;
-							maxArea = currArea;
+                            Imgproc.minEnclosingCircle(c2f, led1.Center, radiusArray);
+                            led1.Found = true;
+                            led1.Area = currArea;
+                            led1.Radius = radiusArray[0];
                         }
-						else if(!circleFound[1] || (currArea > maxArea2) )
+                        else if (!led2.Found || (currArea > led2.Area))
                         {
-                            Imgproc.minEnclosingCircle(c2f, center2, radius2);
-                            circleFound[1] = true;
-							maxArea2 = currArea;
+                            Imgproc.minEnclosingCircle(c2f, led2.Center, radiusArray);
+                            led2.Found = true;
+                            led2.Area = currArea;
+                            led2.Radius = radiusArray[0];
                         }
-
-                        maxArea = currArea;
                     }
 
                     // Draw the countour
-                    Imgproc.drawContours(renderMat, m_contours, idx, new Scalar(255, 0, 0, 255));
+                    if(doDraw)
+                        Imgproc.drawContours(renderMat, contours, idx, new Scalar(255, 0, 0, 255));
                 }
 
-                if (circleFound[0])
-                    Imgproc.circle(renderMat, center1, (int)radius1[0], new Scalar(0, 255, 0, 255), 2);
+                if (doDraw && led1.Found)
+                    Imgproc.circle(renderMat, led1.Center, (int)led1.Radius, new Scalar(255, 0, 0, 255), 2);
 
-                if (circleFound[1])
-                    Imgproc.circle(renderMat, center2, (int)radius2[0], new Scalar(0, 0, 255, 255), 2);
+                if (doDraw && led2.Found)
+                    Imgproc.circle(renderMat, led2.Center, (int)led2.Radius, new Scalar(255, 0, 0, 255), 2);
             }
-            
-            Utils.matToTexture2D(renderMat, m_texture, colors);
-			//Utils.matToTexture2D(rgbMat, m_texture, colors);
-
-			/*
-			if (debugPrint == 50)
-			{
-				//string s = rgbaMat.dump();
-				for(int i = 100; i < 105; ++i)
-				{
-					for(int j = 100; j < 105; ++j)
-					{
-						if(rgbaMat != null)
-						{
-							double[] data = rgbaMat.get(i, j);
-							Debug.Log(data[0] + ", " + data[1] + ", " + data[2] + ", " + data[3]);
-						}
-					}
-				}
-
-			}
-			++debugPrint;
-			*/
         }
     }
     
@@ -440,7 +483,7 @@ namespace OpenCVForUnitySample
 				if(job.JobState == ThreadedJobState.Idle)
 				{
 					currJob = job;
-					Debug.Log("job: " + i);
+					// Debug.Log("job: " + i);
 					break;
 				}
 
@@ -466,10 +509,10 @@ namespace OpenCVForUnitySample
                 Vector3 newPos = new Vector3();
 				if(currJob.GetTrackableInfo(ref newPos))
                 {
-                    //if (!targetPosDebug.activeSelf)
-                    //    targetPosDebug.SetActive(true);
-
-                    //targetPosDebug.transform.position = newPos;
+                    if (!targetPosDebug.activeSelf)
+                        targetPosDebug.SetActive(true);
+                                        
+                    targetPosDebug.transform.position = newPos;
                 }
             }
         }
