@@ -52,9 +52,6 @@ namespace OpenCVForUnitySample
         Mat m_greenHierarchy;
 
         // HSV: 180-230, 0-100, 50-100
-        Scalar minHSV = new Scalar(0, 0, 0);
-        Scalar maxHSV = new Scalar(180, 255, 255);
-
         Scalar minRedHSV = new Scalar(0, 0, 201);
         Scalar maxRedHSV = new Scalar(45, 60, 255);
         Scalar minGreenHSV = new Scalar(63, 0, 180);
@@ -74,21 +71,35 @@ namespace OpenCVForUnitySample
 
 		int debugPrint = 0;
 
-        public void SetMinHSV(float h, float s, float v)
+        public void SetMinRedHSV(float h, float s, float v)
         {
-            minHSV.val[0] = h;
-            minHSV.val[1] = s;
-            minHSV.val[2] = v;
+            minRedHSV.val[0] = h;
+            minRedHSV.val[1] = s;
+            minRedHSV.val[2] = v;
         }
 
-        public void SetMaxHSV(float h, float s, float v)
+        public void SetMaxRedHSV(float h, float s, float v)
         {
-            maxHSV.val[0] = h;
-            maxHSV.val[1] = s;
-            maxHSV.val[2] = v;
+            maxRedHSV.val[0] = h;
+            maxRedHSV.val[1] = s;
+            maxRedHSV.val[2] = v;
         }
 
-		public void InitOpenCVJob(Vuforia.Image image, Vuforia.Image.PIXEL_FORMAT format, Texture2D texture, Renderer vuforiaRenderer)
+        public void SetMinGreenHSV(float h, float s, float v)
+        {
+            minGreenHSV.val[0] = h;
+            minGreenHSV.val[1] = s;
+            minGreenHSV.val[2] = v;
+        }
+
+        public void SetMaxGreenHSV(float h, float s, float v)
+        {
+            maxGreenHSV.val[0] = h;
+            maxGreenHSV.val[1] = s;
+            maxGreenHSV.val[2] = v;
+        }
+
+        public void InitOpenCVJob(Vuforia.Image image, Vuforia.Image.PIXEL_FORMAT format, Texture2D texture, Renderer vuforiaRenderer)
         {
 			m_pixelFormat = format;
             m_texture = texture;
@@ -162,7 +173,6 @@ namespace OpenCVForUnitySample
 
             FindCountours(minRedHSV, maxRedHSV, m_redContours, m_redHierarchy);
             FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
-            //FindCountours(minHSV, maxHSV, m_greenContours, m_greenHierarchy);
         }
 
         void FindCountours(Scalar min, Scalar max, List<MatOfPoint> contours, Mat hierarchy)
@@ -264,8 +274,10 @@ namespace OpenCVForUnitySample
             led2.Found = false;
 
             // TODO: Change min/max HSV, blur, or erode/diolate values to lower contour count
-            if (contours.Count > 2)
-                return;
+            //if (contours.Count > 2)
+            //    return;
+
+            //Debug.Log("hierarchy.rows(): " + hierarchy.rows());
 
             // if any contour exist...
             if (hierarchy.rows() > 0)
@@ -321,18 +333,27 @@ namespace OpenCVForUnitySample
     
     public class LEDDetector : MonoBehaviour
     {
-        [SerializeField] Slider hMinSlider;
-        [SerializeField] Slider hMaxSlider;
-        [SerializeField] Slider sMinSlider;
-        [SerializeField] Slider sMaxSlider;
-        [SerializeField] Slider vMinSlider;
-        [SerializeField] Slider vMaxSlider;
+        [SerializeField] Slider hMinRedSlider;
+        [SerializeField] Slider hMaxRedSlider;
+        [SerializeField] Slider sMinRedSlider;
+        [SerializeField] Slider sMaxRedSlider;
+        [SerializeField] Slider vMinRedSlider;
+        [SerializeField] Slider vMaxRedSlider;
+        [SerializeField] Slider hMinGreenSlider;
+        [SerializeField] Slider hMaxGreenSlider;
+        [SerializeField] Slider sMinGreenSlider;
+        [SerializeField] Slider sMaxGreenSlider;
+        [SerializeField] Slider vMinGreenSlider;
+        [SerializeField] Slider vMaxGreenSlider;
         [SerializeField] Renderer renderTarget;
         [SerializeField] Renderer vuforiaRenderTarget;
         [SerializeField] GameObject targetPosDebug;
         
         OpenCVJob[] m_jobs;
-		Vuforia.Image image = null;
+        Vector3[] m_targetPosArray;
+        int m_maxTargetPosSz = 10;
+        int m_currTargetPosIndx = 0;
+        Vuforia.Image image = null;
         Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
         bool m_formatRegistered = false;
 		bool m_lastFrameTracked = false;
@@ -348,7 +369,7 @@ namespace OpenCVForUnitySample
             VuforiaARController.Instance.RegisterVuforiaStartedCallback(OnVuforiaStarted);
             VuforiaARController.Instance.RegisterOnPauseCallback(OnVuforiaPause);
             VuforiaARController.Instance.RegisterTrackablesUpdatedCallback(OnVuforiaTrackablesUpdated);
-
+            
             targetPosDebug.SetActive(false);
         }
 
@@ -405,17 +426,6 @@ namespace OpenCVForUnitySample
 
         IEnumerator InitMats()
         {
-            //while(!VuforiaRenderer.Instance.IsVideoBackgroundInfoAvailable() || !VuforiaRenderer.Instance.VideoBackgroundTexture)
-            //{
-            //    yield return new WaitForSeconds(0.1f);
-            //}
-
-            //Texture2D bgTexture = (Texture2D)VuforiaRenderer.Instance.VideoBackgroundTexture;
-            //while ((bgTexture.format != TextureFormat.RGB24 && bgTexture.format != TextureFormat.RGBA32))
-            //{
-            //    yield return new WaitForSeconds(0.1f);
-            //}
-
             while (!m_formatRegistered)
             {
                 yield return new WaitForSeconds(0.1f);
@@ -453,8 +463,10 @@ namespace OpenCVForUnitySample
 				m_jobs[i].Start();
 			}
 
-            OnMinValueSlider();
-            OnMaxValueSlider();
+            OnMinRedValueSlider();
+            OnMaxRedValueSlider();
+            OnMinGreenValueSlider();
+            OnMaxGreenValueSlider();
         }
 
         // Only update when Vuforia has updated it's frame
@@ -463,35 +475,64 @@ namespace OpenCVForUnitySample
             StartCoroutine(TrackTargets());
         }
 
+        OpenCVJob GetAvailableJobThread()
+        {
+            OpenCVJob currJob = null;
+            int i = 0;
+            foreach (OpenCVJob job in m_jobs)
+            {
+                if (job.JobState == ThreadedJobState.Idle)
+                {
+                    currJob = job;
+                    // Debug.Log("job: " + i);
+                    break;
+                }
+
+                ++i;
+            }
+
+            return currJob;
+        }
+
+        void UpdateTargetPos(OpenCVJob job)
+        {
+            Vector3 newPos = new Vector3();
+            if (job.GetTrackableInfo(ref newPos))
+            {
+                if (!targetPosDebug.activeSelf)
+                    targetPosDebug.SetActive(true);
+
+                if (m_targetPosArray == null)
+                {
+                    m_targetPosArray = new Vector3[m_maxTargetPosSz];
+                    for (int indx = 0; indx < m_targetPosArray.Length; ++indx)
+                        m_targetPosArray[indx] = newPos;
+                }
+
+                m_targetPosArray[m_currTargetPosIndx++] = newPos;
+                if (m_currTargetPosIndx >= m_maxTargetPosSz)
+                    m_currTargetPosIndx = 0;
+
+                Vector3 newCenter = Vector3.zero;
+                foreach(Vector3 v in m_targetPosArray)
+                    newCenter += v;
+
+                targetPosDebug.transform.position = newCenter / m_targetPosArray.Length;
+            }
+        }
+
 		private IEnumerator TrackTargets()
 		{
             if (!m_formatRegistered || m_jobs == null)
-            {
                 yield break;
-            }
 
             //Vuforia.Image image = CameraDevice.Instance.GetCameraImage(m_pixelFormat);
             if (image == null || !image.IsValid())
-            {
                 yield break;
-            }
-
-			OpenCVJob currJob = null;
-			int i = 0;
-			foreach(OpenCVJob job in m_jobs)
-			{
-				if(job.JobState == ThreadedJobState.Idle)
-				{
-					currJob = job;
-					// Debug.Log("job: " + i);
-					break;
-				}
-
-				++i;
-			}
 
             // Check if job is completed before starting again
-			if (currJob != null)
+            OpenCVJob currJob = GetAvailableJobThread();
+            if (currJob != null)
             {
 				m_lastFrameTracked = !m_lastFrameTracked;
 
@@ -505,28 +546,32 @@ namespace OpenCVForUnitySample
 				currJob.Work();
 				yield return StartCoroutine(currJob.WaitFor());
 
-                // Debug target pos
-                Vector3 newPos = new Vector3();
-				if(currJob.GetTrackableInfo(ref newPos))
-                {
-                    if (!targetPosDebug.activeSelf)
-                        targetPosDebug.SetActive(true);
-                                        
-                    targetPosDebug.transform.position = newPos;
-                }
+                UpdateTargetPos(currJob);
             }
         }
 
-        public void OnMinValueSlider()
+        public void OnMinRedValueSlider()
         {
 			foreach(OpenCVJob job in m_jobs)
-            	job.SetMinHSV(hMinSlider.value, sMinSlider.value, vMinSlider.value);
+            	job.SetMinRedHSV(hMinRedSlider.value, sMinRedSlider.value, vMinRedSlider.value);
         }
 
-        public void OnMaxValueSlider()
+        public void OnMaxRedValueSlider()
         {
 			foreach(OpenCVJob job in m_jobs)
-            	job.SetMaxHSV(hMaxSlider.value, sMaxSlider.value, vMaxSlider.value);
+            	job.SetMaxRedHSV(hMaxRedSlider.value, sMaxRedSlider.value, vMaxRedSlider.value);
+        }
+
+        public void OnMinGreenValueSlider()
+        {
+            foreach (OpenCVJob job in m_jobs)
+                job.SetMinGreenHSV(hMinGreenSlider.value, sMinGreenSlider.value, vMinGreenSlider.value);
+        }
+
+        public void OnMaxGreenValueSlider()
+        {
+            foreach (OpenCVJob job in m_jobs)
+                job.SetMaxGreenHSV(hMaxGreenSlider.value, sMaxGreenSlider.value, vMaxGreenSlider.value);
         }
     }
 }
