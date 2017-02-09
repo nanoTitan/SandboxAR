@@ -56,6 +56,8 @@ namespace OpenCVForUnitySample
         // HSV: 180-230, 0-100, 50-100
         Scalar minRedHSV = new Scalar(0, 0, 201);
         Scalar maxRedHSV = new Scalar(45, 60, 255);
+        //Scalar minRedHSV = new Scalar(0, 78, 45);
+        //Scalar maxRedHSV = new Scalar(8, 255, 211);
         Scalar minGreenHSV = new Scalar(63, 0, 180);
         Scalar maxGreenHSV = new Scalar(90, 42, 255);
 
@@ -187,7 +189,7 @@ public void SetMinRedHSV(float h, float s, float v)
             Imgproc.cvtColor(rgbMat, m_hsvMat, Imgproc.COLOR_RGB2HSV);
 
             FindCountours(minRedHSV, maxRedHSV, m_redContours, m_redHierarchy);
-            //FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
+            FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
             //FindLines();
             MeanShiftTracking();
         }
