@@ -40,16 +40,18 @@ namespace OpenCVForUnitySample
     public class OpenCVJob : ThreadedJob
     {
         Mat rgbaMat;
-		Mat rgbMat;
+        Mat rgbMat;
         Mat renderMat;
         Mat blurredMat;
-        Mat hsvMat;
-		Mat threshold;
+        Mat m_hsvMat;
+        Mat threshold;
         Mat morphOutputMat;
         Mat dilateElement;
         Mat erodeElement;
         Mat m_redHierarchy;
         Mat m_greenHierarchy;
+        Mat m_linesMat;
+        Mat m_hist;
 
         // HSV: 180-230, 0-100, 50-100
         Scalar minRedHSV = new Scalar(0, 0, 201);
@@ -61,17 +63,26 @@ namespace OpenCVForUnitySample
         byte m_brightness = 0;
         float focalLength = 10.0f; // 790.65f;
         float targetWidth = 62.0f * 0.0804f;  // translate mm to world units
-		Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
+        Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
         LEDTrackable[] m_ledTrackableArray = null;
         Color32[] colors = null;
         List<MatOfPoint> m_redContours = null;
         List<MatOfPoint> m_greenContours = null;
-        Texture2D m_texture;
+        List<Mat> m_images = new List<Mat>();
         Renderer m_vuforiaRenderer;
+        OpenCVForUnity.Rect m_trackWindow = new OpenCVForUnity.Rect(100, 100, 100, 100);
 
-		int debugPrint = 0;
+        int debugPrint = 0;
 
-        public void SetMinRedHSV(float h, float s, float v)
+        public Mat RenderMat { get { return renderMat; } }
+        public Texture2D Texture { get; set; }
+
+        public Color32[] Colors
+        {
+            get { return colors; }
+        }
+
+public void SetMinRedHSV(float h, float s, float v)
         {
             minRedHSV.val[0] = h;
             minRedHSV.val[1] = s;
@@ -102,11 +113,11 @@ namespace OpenCVForUnitySample
         public void InitOpenCVJob(Vuforia.Image image, Vuforia.Image.PIXEL_FORMAT format, Texture2D texture, Renderer vuforiaRenderer)
         {
 			m_pixelFormat = format;
-            m_texture = texture;
+            Texture = texture;
             m_vuforiaRenderer = vuforiaRenderer;
 
             blurredMat = new Mat();
-            hsvMat = new Mat();
+            m_hsvMat = new Mat();
 			threshold = new Mat();
             morphOutputMat = new Mat();
             m_redHierarchy = new Mat();
@@ -123,14 +134,16 @@ namespace OpenCVForUnitySample
 				rgbaMat = new Mat(new Size(image.Width, image.Height), CvType.CV_8UC4);
 			}
             
-            renderMat = new Mat(m_texture.height, m_texture.width, CvType.CV_8UC4);
-            colors = new Color32[m_texture.width * m_texture.height];
+            renderMat = new Mat(Texture.height, Texture.width, CvType.CV_8UC4);
+            colors = new Color32[Texture.width * Texture.height];
             m_redContours = new List<MatOfPoint>();
             m_greenContours = new List<MatOfPoint>();
 
             m_ledTrackableArray = new LEDTrackable[(int)TrackableID.NumTrackableIDs];
             for(int i = 0; i < m_ledTrackableArray.Length; ++i)
                 m_ledTrackableArray[i] = new LEDTrackable();
+
+            InitMeanShiftTracking();
         }
         
         public void UpdateMat(Vuforia.Image image)
@@ -169,15 +182,19 @@ namespace OpenCVForUnitySample
             // Blur
             //Imgproc.blur(rgbMat, blurredMat, new Size(7, 7));
 
-            Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
+            renderMat.setTo(new Scalar(0, 0, 0, 0));
+            m_hsvMat = new Mat();
+            Imgproc.cvtColor(rgbMat, m_hsvMat, Imgproc.COLOR_RGB2HSV);
 
             FindCountours(minRedHSV, maxRedHSV, m_redContours, m_redHierarchy);
-            FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
+            //FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
+            //FindLines();
+            MeanShiftTracking();
         }
 
         void FindCountours(Scalar min, Scalar max, List<MatOfPoint> contours, Mat hierarchy)
         {
-            Core.inRange(hsvMat, min, max, threshold);
+            Core.inRange(m_hsvMat, min, max, threshold);
 
             // morphological operators
             // dilate with large element, erode with small ones
@@ -191,10 +208,99 @@ namespace OpenCVForUnitySample
             Imgproc.dilate(threshold, threshold, dilateElement);
 
             contours.Clear();
-            renderMat.setTo(new Scalar(0, 0, 0, 0));
 
             // find contours
             Imgproc.findContours(threshold, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+        }
+
+        void FindLines()
+        {
+            int lowThreshold = 100;
+            int ratio = 3;
+
+            Mat detectedEdges = new Mat();
+            Mat grayImage = new Mat();
+            Imgproc.cvtColor(rgbMat, grayImage, Imgproc.COLOR_RGB2GRAY);
+
+            Imgproc.blur(grayImage, detectedEdges, new Size(3, 3));
+            Imgproc.Canny(detectedEdges, detectedEdges, lowThreshold, lowThreshold * ratio, 3, false);
+
+            rgbMat.copyTo(renderMat, detectedEdges);
+
+            // Hough Lines
+            //m_linesMat = new Mat();
+            //Imgproc.HoughLinesP(detectedEdges, m_linesMat, 1, System.Math.PI / 180, 50, 20, 5);
+
+            //for (int i = 0; i < m_linesMat.cols(); i++)
+            //{
+            //    double[] val = m_linesMat.get(0, i);
+            //    if (val == null)                        // Prevent silent crash!
+            //        return;
+
+            //    Imgproc.line(renderMat, new Point(val[0], val[1]), new Point(val[2], val[3]), new Scalar(0, 0, 255), 2);
+            //}
+
+            Mat dst = new Mat();
+            Core.inRange(renderMat, minGreenHSV, maxGreenHSV, dst);
+            //dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+            //erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(1, 1));
+
+            renderMat.setTo(new Scalar(0, 0, 0));
+            Imgproc.cvtColor(detectedEdges, renderMat, Imgproc.COLOR_GRAY2RGB);
+
+            //Imgproc.erode(dst, dst, erodeElement);
+            //Imgproc.erode(dst, dst, erodeElement);
+
+            //Imgproc.dilate(dst, dst, dilateElement);
+            //Imgproc.dilate(dst, dst, dilateElement);
+
+            Imgproc.findContours(dst, m_greenContours, m_greenHierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+        }
+
+        bool InitMeanShiftTracking()
+        {
+            if (rgbMat == null || rgbMat.rows() == 0 || rgbMat.height() == 0)
+                return false;
+
+            Mat roiMat = rgbMat.submat(m_trackWindow);
+            Mat hsvMat = new Mat();
+            Mat mask = new Mat();
+            m_hist = new Mat();
+            MatOfInt histSize = new MatOfInt(256);
+            MatOfFloat histRange = new MatOfFloat(0f, 256f);
+
+            Imgproc.cvtColor(roiMat, hsvMat, Imgproc.COLOR_RGB2HSV);
+            Core.inRange(hsvMat, minRedHSV, maxRedHSV, mask);
+
+            List<Mat> images = new List<Mat> { hsvMat };
+            MatOfInt channels = new MatOfInt(0);
+            Imgproc.calcHist(images, channels, mask, m_hist, histSize, histRange);
+            Core.normalize(m_hist, m_hist, 0, 255, Core.NORM_MINMAX);
+
+            return true;
+        }
+
+        void MeanShiftTracking()
+        {
+            if (m_hist == null)
+            {
+                if (!InitMeanShiftTracking())
+                    return;
+            }
+            
+            Mat hsvMat = new Mat();
+            MatOfFloat histRange = new MatOfFloat(0f, 256f);
+            TermCriteria tc = new TermCriteria(TermCriteria.EPS | TermCriteria.COUNT, 80, 1);
+
+            Imgproc.cvtColor(rgbMat, hsvMat, Imgproc.COLOR_RGB2HSV);
+
+            List<Mat> images = new List<Mat> { hsvMat };
+            MatOfInt channels = new MatOfInt(0);
+            Mat dst = new Mat();
+            Imgproc.calcBackProject(images, channels, m_hist, dst, histRange, 1);
+            Video.meanShift(dst, m_trackWindow, tc);
+
+            Imgproc.rectangle(renderMat, new Point(m_trackWindow.x, m_trackWindow.y), new Point(m_trackWindow.x + m_trackWindow.width, m_trackWindow.y + m_trackWindow.height), new Scalar(255, 0, 0, 255), 2);
         }
 
         public bool GetTrackableInfo(ref Vector3 pos)
@@ -263,8 +369,8 @@ namespace OpenCVForUnitySample
 
             FindLEDs(m_redContours, m_redHierarchy, m_ledTrackableArray[(int)TrackableID.LEDRed1], m_ledTrackableArray[(int)TrackableID.LEDRed2], true);
             FindLEDs(m_greenContours, m_greenHierarchy, m_ledTrackableArray[(int)TrackableID.LEDGreen1], m_ledTrackableArray[(int)TrackableID.LEDGreen2], true);
-
-            Utils.matToTexture2D(renderMat, m_texture, colors);
+            
+            Utils.matToTexture2D(renderMat, Texture, colors);
 			//Utils.matToTexture2D(threshold, m_texture, colors);
         }
 
@@ -455,7 +561,7 @@ namespace OpenCVForUnitySample
                 vuforiaRenderTarget.transform.localScale.z * 2,
                 vuforiaRenderTarget.transform.localScale.y * 2);
 
-			m_jobs = new OpenCVJob[5];
+			m_jobs = new OpenCVJob[1];
 			for(int i = 0; i < m_jobs.Length; ++i)
 			{
 				m_jobs[i] = new OpenCVJob();
@@ -545,7 +651,7 @@ namespace OpenCVForUnitySample
 				currJob.UpdateMat(image);
 				currJob.Work();
 				yield return StartCoroutine(currJob.WaitFor());
-
+                
                 UpdateTargetPos(currJob);
             }
         }
