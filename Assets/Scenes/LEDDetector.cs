@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using System.Collections.Generic;
 using System.Collections;
 using Vuforia;
+using System;
 
 #if UNITY_5_3 || UNITY_5_3_OR_NEWER
 using UnityEngine.SceneManagement;
@@ -11,6 +12,13 @@ using OpenCVForUnity;
 
 namespace OpenCVForUnitySample
 {
+    public enum LEDColor
+    {
+        LED_RED = 0,
+        LED_GREEN = 1,
+        LED_BLUE = 2,
+    }
+
     public enum TrackableID
     {
         LEDRed1 = 0,
@@ -21,19 +29,41 @@ namespace OpenCVForUnitySample
         NumTrackableIDs // Make sure this is last for total count
     }
 
+    public class LEDContourInfo
+    {
+        public LEDContourInfo()
+        {
+            Center = new Vector2(0, 0);
+            Radius = 0;
+            Area = 0;
+            ColorCode = LEDColor.LED_RED;
+            MinR2R = double.MaxValue;
+            MinR2G = double.MaxValue;
+            MinG2G = double.MaxValue;
+        }
+
+        public Vector2 Center { get; set; }
+        public float Radius { get; set; }
+        public float Area { get; set; }
+        public double MinR2R { get; set; }
+        public double MinR2G { get; set; }
+        public double MinG2G { get; set; }
+        public LEDColor ColorCode { get; set; }
+    }
+
     public class LEDTrackable
     {
         public LEDTrackable()
         {
-            Center = new Point(0, 0);
+            Center = new Vector2(0, 0);
             Radius = 0;
             Area = 0;
             Found = false;
         }
 
-        public Point Center { get; set; }
+        public Vector2 Center { get; set; }
         public float Radius { get; set; }
-        public double Area { get; set; }
+        public float Area { get; set; }
         public bool Found { get; set; }
     }
 
@@ -55,17 +85,17 @@ namespace OpenCVForUnitySample
 
         // HSV: 180-230, 0-100, 50-100
         Scalar minRedHSV = new Scalar(0, 0, 201);
-        Scalar maxRedHSV = new Scalar(45, 60, 255);
-        //Scalar minRedHSV = new Scalar(0, 78, 45);
-        //Scalar maxRedHSV = new Scalar(8, 255, 211);
-        Scalar minGreenHSV = new Scalar(63, 0, 180);
-        Scalar maxGreenHSV = new Scalar(90, 42, 255);
-
-        float m_contrast = 0.2f;
-        byte m_brightness = 0;
+        Scalar maxRedHSV = new Scalar(180, 75, 255);
+        Scalar minBlueHSV = new Scalar(91, 0, 232);
+        Scalar maxBlueHSV = new Scalar(116, 255, 255); 
+        Scalar minGreenHSV = new Scalar(78, 0, 180);
+        Scalar maxGreenHSV = new Scalar(104, 82, 255);
+        
         float focalLength = 10.0f; // 790.65f;
         float targetWidth = 62.0f * 0.0804f;  // translate mm to world units
+        float m_P = 0;  // Apparent width in pixels
         Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
+        List<LEDContourInfo> m_ledCountourList;
         LEDTrackable[] m_ledTrackableArray = null;
         Color32[] colors = null;
         List<MatOfPoint> m_redContours = null;
@@ -73,8 +103,8 @@ namespace OpenCVForUnitySample
         List<Mat> m_images = new List<Mat>();
         Renderer m_vuforiaRenderer;
         OpenCVForUnity.Rect m_trackWindow = new OpenCVForUnity.Rect(100, 100, 100, 100);
-
-        int debugPrint = 0;
+        bool m_isTracking = false;
+        Vector2 m_trackCenter;
 
         public Mat RenderMat { get { return renderMat; } }
         public Texture2D Texture { get; set; }
@@ -84,7 +114,7 @@ namespace OpenCVForUnitySample
             get { return colors; }
         }
 
-public void SetMinRedHSV(float h, float s, float v)
+        public void SetMinRedHSV(float h, float s, float v)
         {
             minRedHSV.val[0] = h;
             minRedHSV.val[1] = s;
@@ -145,7 +175,7 @@ public void SetMinRedHSV(float h, float s, float v)
             for(int i = 0; i < m_ledTrackableArray.Length; ++i)
                 m_ledTrackableArray[i] = new LEDTrackable();
 
-            InitMeanShiftTracking();
+            //InitMeanShiftTracking();
         }
         
         public void UpdateMat(Vuforia.Image image)
@@ -178,55 +208,57 @@ public void SetMinRedHSV(float h, float s, float v)
 				Imgproc.cvtColor(rgbaMat, rgbMat, Imgproc.COLOR_RGBA2RGB);
 			}
 
-            // Adjust contrast and brightness
-            //rgbMat.convertTo(rgbMat, -1, m_contrast, m_brightness);
-
             // Blur
-            //Imgproc.blur(rgbMat, blurredMat, new Size(7, 7));
+            Imgproc.blur(rgbMat, blurredMat, new Size(7, 7));
 
             renderMat.setTo(new Scalar(0, 0, 0, 0));
             m_hsvMat = new Mat();
-            Imgproc.cvtColor(rgbMat, m_hsvMat, Imgproc.COLOR_RGB2HSV);
+            Imgproc.cvtColor(blurredMat, m_hsvMat, Imgproc.COLOR_RGB2HSV);
 
-            FindCountours(minRedHSV, maxRedHSV, m_redContours, m_redHierarchy);
-            FindCountours(minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
+            FindCountours(m_hsvMat, minRedHSV, maxRedHSV, m_redContours, m_redHierarchy);
+            FindCountours(m_hsvMat, minGreenHSV, maxGreenHSV, m_greenContours, m_greenHierarchy);
             //FindLines();
-            MeanShiftTracking();
+            //MeanShiftTracking();
         }
 
-        void FindCountours(Scalar min, Scalar max, List<MatOfPoint> contours, Mat hierarchy)
+        void FindCountours(Mat src, Scalar min, Scalar max, List<MatOfPoint> contours, Mat hierarchy)
         {
-            Core.inRange(m_hsvMat, min, max, threshold);
+            Mat dst = new Mat();
+            Core.inRange(src, min, max, dst);
 
             // morphological operators
             // dilate with large element, erode with small ones
             dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(8, 8));
             erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
 
-            Imgproc.erode(threshold, threshold, erodeElement);
-            Imgproc.erode(threshold, threshold, erodeElement);
+            Imgproc.erode(dst, dst, erodeElement);
+            Imgproc.erode(dst, dst, erodeElement);
 
-            Imgproc.dilate(threshold, threshold, dilateElement);
-            Imgproc.dilate(threshold, threshold, dilateElement);
+            //Imgproc.dilate(dst, dst, dilateElement);
+            Imgproc.dilate(dst, dst, dilateElement);
 
             contours.Clear();
 
             // find contours
-            Imgproc.findContours(threshold, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+            Imgproc.findContours(dst, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
         }
 
         void FindLines()
         {
-            int lowThreshold = 100;
+            int lowThreshold = 50;
             int ratio = 3;
 
             Mat detectedEdges = new Mat();
             Mat grayImage = new Mat();
-            Imgproc.cvtColor(rgbMat, grayImage, Imgproc.COLOR_RGB2GRAY);
+            Mat dst = new Mat();
 
-            Imgproc.blur(grayImage, detectedEdges, new Size(3, 3));
+            Core.inRange(rgbMat, minGreenHSV, maxGreenHSV, dst);
+            Imgproc.blur(dst, detectedEdges, new Size(3, 3));
+
+            //Imgproc.cvtColor(rgbMat, grayImage, Imgproc.COLOR_RGB2GRAY);
+            //Imgproc.blur(grayImage, detectedEdges, new Size(3, 3));
+
             Imgproc.Canny(detectedEdges, detectedEdges, lowThreshold, lowThreshold * ratio, 3, false);
-
             rgbMat.copyTo(renderMat, detectedEdges);
 
             // Hough Lines
@@ -242,13 +274,13 @@ public void SetMinRedHSV(float h, float s, float v)
             //    Imgproc.line(renderMat, new Point(val[0], val[1]), new Point(val[2], val[3]), new Scalar(0, 0, 255), 2);
             //}
 
-            Mat dst = new Mat();
-            Core.inRange(renderMat, minGreenHSV, maxGreenHSV, dst);
+            //Mat dst = new Mat();
+            //Core.inRange(renderMat, minGreenHSV, maxGreenHSV, dst);
             //dilateElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
             //erodeElement = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(1, 1));
 
-            renderMat.setTo(new Scalar(0, 0, 0));
-            Imgproc.cvtColor(detectedEdges, renderMat, Imgproc.COLOR_GRAY2RGB);
+            //renderMat.setTo(new Scalar(0, 0, 0));
+            //Imgproc.cvtColor(detectedEdges, renderMat, Imgproc.COLOR_GRAY2RGB);
 
             //Imgproc.erode(dst, dst, erodeElement);
             //Imgproc.erode(dst, dst, erodeElement);
@@ -256,7 +288,7 @@ public void SetMinRedHSV(float h, float s, float v)
             //Imgproc.dilate(dst, dst, dilateElement);
             //Imgproc.dilate(dst, dst, dilateElement);
 
-            Imgproc.findContours(dst, m_greenContours, m_greenHierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+            //Imgproc.findContours(dst, m_greenContours, m_greenHierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
         }
 
         bool InitMeanShiftTracking()
@@ -321,31 +353,18 @@ public void SetMinRedHSV(float h, float s, float v)
             D: distance to camera (mm or inches) 
             */
 
-            // Target's Center screen space
-            Point center = new Point();
+            if (!m_isTracking)
+                return false;
 
-            foreach (LEDTrackable led in m_ledTrackableArray)
-            {
-                if(!led.Found)
-                    return false;
-
-                center += led.Center;
-            }
-
-            // Target's Center screen space
-            float oneOverNumTrackables = 1.0f / (float)TrackableID.NumTrackableIDs;
-            Vector2 targetCenter = new Vector2((float)(center.x * oneOverNumTrackables), (float)(center.y * oneOverNumTrackables));
-
-            float P = Mathf.Abs((float)(m_ledTrackableArray[0].Center.x - m_ledTrackableArray[1].Center.x));
-            float D = targetWidth * focalLength / P;
+            float D = targetWidth * focalLength / m_P;
 
             //Debug.Log("P: " + P);
 
             // Rotate Camera
             float halfW = VuforiaRenderer.Instance.VideoBackgroundTexture.width * 0.5f;
             float halfH = VuforiaRenderer.Instance.VideoBackgroundTexture.height * 0.5f;
-            float percntX = (targetCenter.x - halfW) / VuforiaRenderer.Instance.VideoBackgroundTexture.width;
-            float percntY = (targetCenter.y - halfH) / VuforiaRenderer.Instance.VideoBackgroundTexture.height;
+            float percntX = (m_trackCenter.x - halfW) / VuforiaRenderer.Instance.VideoBackgroundTexture.width;
+            float percntY = (m_trackCenter.y - halfH) / VuforiaRenderer.Instance.VideoBackgroundTexture.height;
             float dX = m_vuforiaRenderer.transform.lossyScale.x * 2 * percntX;
             float dZ = m_vuforiaRenderer.transform.lossyScale.z * 2 * percntY;    // use z for forward
 
@@ -369,33 +388,34 @@ public void SetMinRedHSV(float h, float s, float v)
             foreach (LEDTrackable led in m_ledTrackableArray)
                 led.Found = false;
 
-            FindLEDs(m_redContours, m_redHierarchy, m_ledTrackableArray[(int)TrackableID.LEDRed1], m_ledTrackableArray[(int)TrackableID.LEDRed2], true);
-            FindLEDs(m_greenContours, m_greenHierarchy, m_ledTrackableArray[(int)TrackableID.LEDGreen1], m_ledTrackableArray[(int)TrackableID.LEDGreen2], true);
-            
+            m_ledCountourList = new List<LEDContourInfo>();
+            ParseContours(m_redContours, m_redHierarchy, m_ledCountourList, LEDColor.LED_RED);
+            ParseContours(m_greenContours, m_greenHierarchy, m_ledCountourList, LEDColor.LED_GREEN);
+
+            // Find the target position based on best fit for color tracking
+            int redIdx1 = -1, redIdx2 = -1, greenIdx1 = -1, greenIdx2 = -1;
+            m_isTracking = FindLEDs(ref redIdx1, ref redIdx2, ref greenIdx1, ref greenIdx2);
+            DrawLEDs(redIdx1, redIdx2, greenIdx1, greenIdx2);
+
             Utils.matToTexture2D(renderMat, Texture, colors);
-			//Utils.matToTexture2D(threshold, m_texture, colors);
+            //Utils.matToTexture2D(threshold, m_texture, colors);
+
+            if (!m_isTracking)
+                return;
+
+            Vector2 c = (m_ledCountourList[redIdx1].Center + m_ledCountourList[redIdx2].Center + m_ledCountourList[greenIdx1].Center + m_ledCountourList[greenIdx2].Center) * 0.25f;
+            m_trackCenter = new Vector2(c.x, c.y);
+
+            Vector2 d = m_ledCountourList[redIdx1].Center - m_ledCountourList[redIdx2].Center;
+            m_P = Mathf.Sqrt( (d.x * d.x + d.y * d.y) );
         }
 
-        void FindLEDs(List<MatOfPoint> contours, Mat hierarchy, LEDTrackable led1, LEDTrackable led2, bool doDraw)
+        void ParseContours(List<MatOfPoint> contours, Mat hierarchy, List<LEDContourInfo> contourInfoList, LEDColor ledColor)
         {
-            led1.Found = false;
-            led2.Found = false;
-
-            // TODO: Change min/max HSV, blur, or erode/diolate values to lower contour count
-            //if (contours.Count > 2)
-            //    return;
-
-            //Debug.Log("hierarchy.rows(): " + hierarchy.rows());
-
-            // if any contour exist...
+            // Red contours
             if (hierarchy.rows() > 0)
             {
-                MatOfPoint currCtr = null;
-                led1.Area = 0;
-                led2.Area = 0;
-                led1.Radius = 0;
-                led2.Radius = 0;
-                double currArea = 0;
+                MatOfPoint currCntr = null;
                 float[] radiusArray = new float[1];
 
                 // for each contour, display it
@@ -403,42 +423,188 @@ public void SetMinRedHSV(float h, float s, float v)
                 {
                     if (idx > contours.Count)
                         break;
+                    
+                    currCntr = contours[idx];                    
+                    MatOfPoint2f c2f = new MatOfPoint2f(currCntr.toArray());
+                    LEDContourInfo info = new LEDContourInfo();
+                    Point center = new Point();
+                    Imgproc.minEnclosingCircle(c2f, center, radiusArray);
+                    info.Area = (float)Imgproc.contourArea(currCntr);
+                    info.Radius = radiusArray[0];
+                    info.ColorCode = ledColor;
+                    info.Center = new Vector2((float)center.x, (float)center.y);
+                    contourInfoList.Add(info);
 
-                    currCtr = contours[idx];
-                    currArea = Imgproc.contourArea(currCtr);
-                    if (currArea > led1.Area || currArea > led2.Area)
-                    {
-                        MatOfPoint2f c2f = new MatOfPoint2f(currCtr.toArray());
-                        if (!led1.Found || (currArea > led1.Area && led1.Area <= led2.Area))
-                        {
-                            Imgproc.minEnclosingCircle(c2f, led1.Center, radiusArray);
-                            led1.Found = true;
-                            led1.Area = currArea;
-                            led1.Radius = radiusArray[0];
-                        }
-                        else if (!led2.Found || (currArea > led2.Area))
-                        {
-                            Imgproc.minEnclosingCircle(c2f, led2.Center, radiusArray);
-                            led2.Found = true;
-                            led2.Area = currArea;
-                            led2.Radius = radiusArray[0];
-                        }
-                    }
-
-                    // Draw the countour
-                    if(doDraw)
+                    if(ledColor == LEDColor.LED_RED)
                         Imgproc.drawContours(renderMat, contours, idx, new Scalar(255, 0, 0, 255));
+                    else
+                        Imgproc.drawContours(renderMat, contours, idx, new Scalar(0, 255, 0, 255));
                 }
-
-                if (doDraw && led1.Found)
-                    Imgproc.circle(renderMat, led1.Center, (int)led1.Radius, new Scalar(255, 0, 0, 255), 2);
-
-                if (doDraw && led2.Found)
-                    Imgproc.circle(renderMat, led2.Center, (int)led2.Radius, new Scalar(255, 0, 0, 255), 2);
             }
         }
+
+        void DrawLEDs(int redIdx1, int redIdx2, int greenIdx1, int greenIdx2)
+        {
+            if(redIdx1 != -1)
+                Imgproc.circle(renderMat, new Point(m_ledCountourList[redIdx1].Center.x, m_ledCountourList[redIdx1].Center.y), (int)m_ledCountourList[redIdx1].Radius, new Scalar(255, 0, 0, 255), 2);
+
+            if(redIdx2 != -1)
+                Imgproc.circle(renderMat, new Point(m_ledCountourList[redIdx2].Center.x, m_ledCountourList[redIdx2].Center.y), (int)m_ledCountourList[redIdx2].Radius, new Scalar(255, 0, 0, 255), 2);
+
+            if(greenIdx1 != -1)
+                Imgproc.circle(renderMat, new Point(m_ledCountourList[greenIdx1].Center.x, m_ledCountourList[greenIdx1].Center.y), (int)m_ledCountourList[greenIdx1].Radius, new Scalar(0, 255, 0, 255), 2);
+
+            if(greenIdx2 != -1)
+                Imgproc.circle(renderMat, new Point(m_ledCountourList[greenIdx2].Center.x, m_ledCountourList[greenIdx2].Center.y), (int)m_ledCountourList[greenIdx2].Radius, new Scalar(0, 255, 0, 255), 2);
+        }
+
+        bool FindLEDs(ref int redIdx1, ref int redIdx2, ref int greenIdx1, ref int greenIdx2)
+        {
+            Vector2 currCenter;
+            double errorMax = double.MaxValue;
+            double errorMaxArea = double.MaxValue;
+            double errorWeighted = double.MaxValue;
+
+            LEDContourInfo[] ledInfo = new LEDContourInfo[4];
+
+            for (int i = 0; i < m_ledCountourList.Count; ++i)
+            {
+                if (m_ledCountourList[i].ColorCode != LEDColor.LED_RED)
+                    continue;
+
+                ledInfo[0] = m_ledCountourList[i];
+
+                for (int j = 0; j < m_ledCountourList.Count; ++j)
+                {
+                    if (i == j)
+                        continue;
+                    
+                    if (m_ledCountourList[j].ColorCode != LEDColor.LED_RED)
+                        continue;
+
+                    ledInfo[1] = m_ledCountourList[j];
+                    for (int m = 0; m < m_ledCountourList.Count; ++m)
+                    {
+                        if (m_ledCountourList[m].ColorCode != LEDColor.LED_GREEN)
+                            continue;
+
+                        ledInfo[2] = m_ledCountourList[m];
+                        for (int n = 0; n < m_ledCountourList.Count; ++n)
+                        {
+                            if (m == n)
+                                continue;
+
+                            if (m_ledCountourList[n].ColorCode != LEDColor.LED_GREEN)
+                                continue;
+
+                            ledInfo[3] = m_ledCountourList[n];
+                            Vector2 center;
+                            float errorDist = 0;
+                            float errorArea = 0;
+                            bool found = GetCenterInfo(ledInfo, out center, ref errorDist, ref errorArea);
+
+                            double errW = errorDist * 2 + errorArea * 1;
+                            if(found && errW < errorWeighted)
+                            {
+                                currCenter = center;
+                                errorMax = errorDist;
+                                errorMaxArea = errorArea;
+                                errorWeighted = errW;
+                                redIdx1 = i;
+                                redIdx2 = j;
+                                greenIdx1 = m;
+                                greenIdx2 = n;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (errorMax == double.MaxValue || errorMaxArea == double.MaxValue)
+                return false;
+
+            Debug.Log("e: " + errorMax + ", a: " + errorMaxArea);
+
+            return true;
+        }
+
+        public bool GetCenterInfo(LEDContourInfo[] ledInfo, out Vector2 center, ref float errorDist, ref float errorArea)
+        {
+            // Find center by average
+            center = (ledInfo[0].Center + ledInfo[1].Center + ledInfo[2].Center + ledInfo[3].Center) * 0.25f;
+
+            if (SamePoint(ledInfo[0], ledInfo[2]) || SamePoint(ledInfo[0], ledInfo[3]) ||
+                SamePoint(ledInfo[1], ledInfo[2]) || SamePoint(ledInfo[1], ledInfo[3]) ||
+                SamePoint(ledInfo[0], ledInfo[1]) || SamePoint(ledInfo[2], ledInfo[3]) )
+            {
+                return false;
+            }
+
+            float minArea = float.MaxValue, maxArea = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                for (int j = i+1; j < 4; ++j)
+                {
+                    if (ledInfo[i].Radius > ledInfo[j].Radius)
+                    {
+                        if (ledInfo[i].Radius * 0.5f > ledInfo[j].Radius)
+                            return false;
+                    }
+                    else
+                    {
+                        if (ledInfo[i].Radius * 0.5f > ledInfo[j].Radius)
+                            return false;
+                    }
+                }
+
+                if (ledInfo[i].Area > maxArea)
+                    maxArea = ledInfo[i].Area;
+
+                if (ledInfo[i].Area < minArea)
+                    minArea = ledInfo[i].Area;
+            }
+
+            float l1 = (ledInfo[0].Center - ledInfo[1].Center).sqrMagnitude;   // Red to red
+            float l2 = (ledInfo[2].Center - ledInfo[3].Center).sqrMagnitude;   // green to green
+            float l3 = (ledInfo[0].Center - ledInfo[2].Center).sqrMagnitude;   // green to red
+            float l4 = (ledInfo[1].Center - ledInfo[3].Center).sqrMagnitude;   // green to red
+            float l5 = (ledInfo[0].Center - ledInfo[3].Center).sqrMagnitude;   // green to red
+            float l6 = (ledInfo[1].Center - ledInfo[2].Center).sqrMagnitude;   // green to red
+
+            // Parallel
+            if (l1 < l2)
+                errorDist += Math.Abs(1 - l1 / l2);
+            else
+                errorDist += Math.Abs(1 - l2 / l1);
+
+            // Parallel
+            if (l3 < l4)
+                errorDist += Math.Abs(1 - l3 / l4);
+            else
+                errorDist += Math.Abs(1 - l5 / l3);
+
+            // Diagonal
+            if (l5 < l6)
+                errorDist += Math.Abs(1 - l5 / l6);
+            else
+                errorDist += Math.Abs(1 - l6 / l5);
+
+            // Area
+            if (minArea < maxArea)
+                errorArea = minArea / maxArea;
+            else
+                errorArea = maxArea / minArea;
+
+            return true;
+        }
+
+        bool SamePoint(LEDContourInfo info1, LEDContourInfo info2)
+        {
+            float l = (info1.Center - info2.Center).sqrMagnitude;
+            return l < (info1.Radius * info1.Radius) || l < (info2.Radius * info2.Radius);
+        }
     }
-    
+
     public class LEDDetector : MonoBehaviour
     {
         [SerializeField] Slider hMinRedSlider;
@@ -459,7 +625,7 @@ public void SetMinRedHSV(float h, float s, float v)
         
         OpenCVJob[] m_jobs;
         Vector3[] m_targetPosArray;
-        int m_maxTargetPosSz = 10;
+        int m_maxTargetPosSz = 1;
         int m_currTargetPosIndx = 0;
         Vuforia.Image image = null;
         Vuforia.Image.PIXEL_FORMAT m_pixelFormat = Vuforia.Image.PIXEL_FORMAT.RGB888;
@@ -626,6 +792,10 @@ public void SetMinRedHSV(float h, float s, float v)
                     newCenter += v;
 
                 targetPosDebug.transform.position = newCenter / m_targetPosArray.Length;
+            }
+            else
+            {
+                targetPosDebug.SetActive(false);
             }
         }
 
